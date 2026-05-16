@@ -60,3 +60,14 @@ export async function signOut() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
+
+/**
+ * Email + password sign-in. Used by the dev-only quick sign-in path on
+ * the login screen so we can skip the Google OAuth round-trip during
+ * iteration. The Supabase session this returns is identical to the one
+ * the OAuth flow produces — RLS works, sync engine works.
+ */
+export async function signInWithEmail(email: string, password: string) {
+  const { error } = await supabase.auth.signInWithPassword({ email, password });
+  if (error) throw error;
+}
