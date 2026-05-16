@@ -2,7 +2,9 @@ import { ActivityIndicator, FlatList, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
-import { useTransactions, type Transaction } from '../../lib/queries/transactions';
+import { useLocalTransactions } from '../../lib/queries/transactions-local';
+import type { LocalTx } from '../../lib/sync/transactions';
+import { useCategories } from '../../lib/queries/categories';
 import { formatCurrency, formatDate } from '../../lib/format';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
@@ -13,7 +15,9 @@ import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
  */
 export default function TransactionsScreen() {
   const { ledger, loading: ledgerLoading } = useActiveLedger();
-  const txs = useTransactions({ ledgerId: ledger?.id, limit: 100 });
+  const txs = useLocalTransactions({ ledgerId: ledger?.id, limit: 100 });
+  const cats = useCategories(ledger?.id);
+  const catById = new Map((cats.data ?? []).map((c) => [c.id, c]));
 
   if (ledgerLoading || txs.isLoading) {
     return (
@@ -48,7 +52,13 @@ export default function TransactionsScreen() {
       <FlatList
         data={txs.data ?? []}
         keyExtractor={(t) => t.id}
-        renderItem={({ item }) => <Row tx={item} currency={ledger.currency} />}
+        renderItem={({ item }) => (
+          <Row
+            tx={item}
+            category={item.category_id ? catById.get(item.category_id) ?? null : null}
+            currency={ledger.currency}
+          />
+        )}
         ItemSeparatorComponent={() => (
           <View className="h-px bg-zinc-100 ml-16" />
         )}
@@ -62,17 +72,31 @@ export default function TransactionsScreen() {
   );
 }
 
-function Row({ tx, currency }: { tx: Transaction; currency: string }) {
+function Row({
+  tx,
+  category,
+  currency,
+}: {
+  tx: LocalTx;
+  category: { name: string; icon: string | null } | null;
+  currency: string;
+}) {
   const isExpense = tx.kind === 'expense';
+  const pending = tx._sync_state !== 'clean';
   return (
-    <View className="flex-row items-center gap-3 px-4 py-3">
-      <EmojiOrIcon value={tx.category?.icon} fallback="sparkle" size={28} />
+    <View
+      className={`flex-row items-center gap-3 px-4 py-3 ${
+        pending ? 'bg-amber-50' : ''
+      }`}
+    >
+      <EmojiOrIcon value={category?.icon} fallback="sparkle" size={28} />
       <View className="flex-1 min-w-0">
         <Text className="font-medium" numberOfLines={1}>
-          {tx.note?.trim() || tx.category?.name || '—'}
+          {tx.note?.trim() || category?.name || '—'}
         </Text>
         <Text className="text-xs text-zinc-500 mt-0.5">
-          {tx.category?.name ?? 'No category'} · {formatDate(tx.occurred_at)}
+          {category?.name ?? 'No category'} · {formatDate(tx.occurred_at)}
+          {pending ? ' · pending' : ''}
         </Text>
       </View>
       <Text

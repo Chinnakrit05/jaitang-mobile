@@ -1,4 +1,5 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from './AuthProvider';
 import { useLedgers } from '../lib/queries/ledgers';
@@ -37,6 +38,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
   const ledgers = useLedgers();
   const { isOnline } = useNetworkStatus();
+  const qc = useQueryClient();
   const [status, setStatus] = useState<SyncStatus>('idle');
   const [lastSyncedAt, setLastSyncedAt] = useState<Date | null>(null);
   const inflight = useRef(false);
@@ -51,9 +53,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     inflight.current = true;
     setStatus('syncing');
     try {
-      await syncTransactions({ ledgerIds });
+      const result = await syncTransactions({ ledgerIds });
       setLastSyncedAt(new Date());
       setStatus('idle');
+      // Bump cached local-DB queries when the store actually changed so
+      // screens re-read the freshly-merged rows.
+      if (result.pulled > 0 || result.pushed > 0) {
+        qc.invalidateQueries({ queryKey: ['local-tx'] });
+      }
     } catch {
       setStatus('error');
     } finally {

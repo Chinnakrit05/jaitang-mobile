@@ -4,7 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { signOut } from '../../lib/auth';
-import { useMonthTransactions } from '../../lib/queries/transactions';
+import { useLocalMonthTransactions } from '../../lib/queries/transactions-local';
 import { formatCurrency } from '../../lib/format';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 import { SyncStatusBadge } from '../../components/SyncStatusBadge';
@@ -18,7 +18,7 @@ import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 export default function DashboardScreen() {
   const { session } = useAuth();
   const { ledger, loading: ledgerLoading } = useActiveLedger();
-  const txs = useMonthTransactions(ledger?.id);
+  const txs = useLocalMonthTransactions(ledger?.id);
 
   const monthIncome = (txs.data ?? [])
     .filter((t) => t.kind === 'income')
