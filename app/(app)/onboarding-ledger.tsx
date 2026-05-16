@@ -66,7 +66,23 @@ export default function OnboardingLedgerScreen() {
       // Replace so back button doesn't return to onboarding.
       router.replace('/(app)/dashboard');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'สร้างไม่สำเร็จ');
+      // Supabase errors come as plain PostgrestError objects (not Error
+      // instances) — surface their `message`, `code`, and `details` so we
+      // can actually see what went wrong instead of a generic fallback.
+      console.error('createLedger failed:', e);
+      let msg = 'สร้างไม่สำเร็จ';
+      if (e && typeof e === 'object') {
+        const err = e as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
+        const parts: string[] = [];
+        if (typeof err.message === 'string' && err.message) parts.push(err.message);
+        if (typeof err.code === 'string' && err.code) parts.push(`(${err.code})`);
+        if (typeof err.details === 'string' && err.details) parts.push(err.details);
+        if (typeof err.hint === 'string' && err.hint) parts.push(`💡 ${err.hint}`);
+        if (parts.length > 0) msg = parts.join(' ');
+      } else if (typeof e === 'string') {
+        msg = e;
+      }
+      setError(msg);
     }
   }
 
