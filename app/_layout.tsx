@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '../providers/AuthProvider';
 import { QueryProvider } from '../providers/QueryProvider';
+import { IconStyleProvider } from '../components/icons/IconStyleContext';
 
 /**
  * Root layout wraps every route in the auth + query providers. Per-segment
@@ -20,8 +21,10 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryProvider>
           <AuthProvider>
-            <StatusBar style="auto" />
-            <Stack screenOptions={{ headerShown: false }} />
+            <IconStyleProvider>
+              <StatusBar style="auto" />
+              <Stack screenOptions={{ headerShown: false }} />
+            </IconStyleProvider>
           </AuthProvider>
         </QueryProvider>
       </SafeAreaProvider>
