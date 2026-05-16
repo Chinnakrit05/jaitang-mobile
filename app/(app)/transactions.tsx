@@ -1,8 +1,11 @@
-import { ActivityIndicator, FlatList, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, FlatList, Pressable, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
-import { useLocalTransactions } from '../../lib/queries/transactions-local';
+import {
+  useDeleteTransaction,
+  useLocalTransactions,
+} from '../../lib/queries/transactions-local';
 import type { LocalTx } from '../../lib/sync/transactions';
 import { useCategories } from '../../lib/queries/categories';
 import { formatCurrency, formatDate } from '../../lib/format';
@@ -18,6 +21,22 @@ export default function TransactionsScreen() {
   const txs = useLocalTransactions({ ledgerId: ledger?.id, limit: 100 });
   const cats = useCategories(ledger?.id);
   const catById = new Map((cats.data ?? []).map((c) => [c.id, c]));
+  const del = useDeleteTransaction();
+
+  function confirmDelete(tx: LocalTx) {
+    Alert.alert(
+      'Delete transaction?',
+      tx.note?.trim() || catById.get(tx.category_id ?? '')?.name || 'This entry',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () => del.mutate(tx.id),
+        },
+      ],
+    );
+  }
 
   if (ledgerLoading || txs.isLoading) {
     return (
@@ -57,6 +76,7 @@ export default function TransactionsScreen() {
             tx={item}
             category={item.category_id ? catById.get(item.category_id) ?? null : null}
             currency={ledger.currency}
+            onLongPress={() => confirmDelete(item)}
           />
         )}
         ItemSeparatorComponent={() => (
@@ -76,16 +96,20 @@ function Row({
   tx,
   category,
   currency,
+  onLongPress,
 }: {
   tx: LocalTx;
   category: { name: string; icon: string | null } | null;
   currency: string;
+  onLongPress: () => void;
 }) {
   const isExpense = tx.kind === 'expense';
   const pending = tx._sync_state !== 'clean';
   return (
-    <View
-      className={`flex-row items-center gap-3 px-4 py-3 ${
+    <Pressable
+      onLongPress={onLongPress}
+      delayLongPress={350}
+      className={`flex-row items-center gap-3 px-4 py-3 active:bg-zinc-100 ${
         pending ? 'bg-amber-50' : ''
       }`}
     >
@@ -107,6 +131,6 @@ function Row({
         {isExpense ? '−' : '+'}
         {formatCurrency(tx.amount, currency)}
       </Text>
-    </View>
+    </Pressable>
   );
 }

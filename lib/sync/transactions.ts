@@ -43,7 +43,7 @@ export type LocalTx = {
 };
 
 const COLUMNS =
-  'id, ledger_id, user_id, category_id, account_id, trip_id, kind, amount, note, occurred_at, payment_method, fx_currency, fx_amount, fx_rate, created_at, updated_at';
+  'id, ledger_id, user_id, category_id, account_id, trip_id, kind, amount, note, occurred_at, payment_method, fx_currency, fx_amount, fx_rate, created_at, updated_at, deleted_at';
 
 export async function pullTransactions(opts: {
   ledgerIds: string[];
@@ -73,7 +73,7 @@ export async function pullTransactions(opts: {
           kind, amount, note, occurred_at, payment_method,
           fx_currency, fx_amount, fx_rate, created_at, updated_at,
           deleted_at, _sync_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'clean')
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'clean')
         ON CONFLICT(id) DO UPDATE SET
           ledger_id=excluded.ledger_id,
           user_id=excluded.user_id,
@@ -90,7 +90,7 @@ export async function pullTransactions(opts: {
           fx_rate=excluded.fx_rate,
           created_at=excluded.created_at,
           updated_at=excluded.updated_at,
-          deleted_at=NULL,
+          deleted_at=excluded.deleted_at,
           _sync_state='clean'
         `,
         [
@@ -110,6 +110,7 @@ export async function pullTransactions(opts: {
           r.fx_rate === null ? null : Number(r.fx_rate),
           r.created_at,
           r.updated_at,
+          r.deleted_at,
         ],
       );
     }
@@ -125,12 +126,39 @@ export async function pushTransactions(): Promise<{
 }> {
   const db = await getDb();
   const pending = await db.getAllAsync<LocalTx>(
-    `SELECT * FROM transactions WHERE _sync_state IN ('pending_create','pending_update')`,
+    `SELECT * FROM transactions WHERE _sync_state IN ('pending_create','pending_update','pending_delete')`,
   );
   let pushed = 0;
   let failed = 0;
 
   for (const row of pending) {
+    if (row._sync_state === 'pending_delete') {
+      // Soft delete server-side. The web app does the same — sets
+      // deleted_at and lets the updated_at trigger fire so the row
+      // reappears on the next pull as a tombstone for any other
+      // device that hadn't caught the deletion yet.
+      const { data, error } = await supabase
+        .from('transactions')
+        .update({ deleted_at: row.deleted_at ?? new Date().toISOString() })
+        .eq('id', row.id)
+        .select('updated_at, deleted_at')
+        .maybeSingle();
+      if (error) {
+        failed++;
+        continue;
+      }
+      await db.runAsync(
+        `UPDATE transactions SET _sync_state='clean', updated_at=?, deleted_at=? WHERE id=?`,
+        [
+          data?.updated_at ?? new Date().toISOString(),
+          data?.deleted_at ?? row.deleted_at,
+          row.id,
+        ],
+      );
+      pushed++;
+      continue;
+    }
+
     const payload = {
       id: row.id,
       ledger_id: row.ledger_id,

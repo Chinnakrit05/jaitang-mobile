@@ -91,3 +91,30 @@ export async function countPendingTransactions(): Promise<number> {
   );
   return row?.n ?? 0;
 }
+
+/**
+ * Soft-delete a transaction locally. The row stays in the table but is
+ * tagged with `deleted_at` so list queries hide it, and `_sync_state`
+ * flips to 'pending_delete' so the next push pass propagates the
+ * deletion server-side.
+ *
+ * If the row was a `pending_create` that never made it to the server,
+ * just drop it outright — there's no remote row to delete.
+ */
+export async function deleteLocalTransaction(id: string): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ _sync_state: string }>(
+    `SELECT _sync_state FROM transactions WHERE id = ?`,
+    [id],
+  );
+  if (!row) return;
+  if (row._sync_state === 'pending_create') {
+    await db.runAsync(`DELETE FROM transactions WHERE id = ?`, [id]);
+    return;
+  }
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE transactions SET deleted_at = ?, updated_at = ?, _sync_state = 'pending_delete' WHERE id = ?`,
+    [now, now, id],
+  );
+}

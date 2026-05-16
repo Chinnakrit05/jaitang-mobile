@@ -6,6 +6,7 @@ import {
 
 import {
   createLocalTransaction,
+  deleteLocalTransaction,
   listLocalTransactions,
   type NewTxInput,
 } from '../db/transactions';
@@ -46,6 +47,20 @@ export function useLocalMonthTransactions(ledgerId: string | undefined) {
     (t) => t.occurred_at >= from && t.occurred_at < to,
   );
   return { ...all, data };
+}
+
+export function useDeleteTransaction() {
+  const qc = useQueryClient();
+  const { syncNow } = useSync();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      await deleteLocalTransaction(id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QK });
+      void syncNow();
+    },
+  });
 }
 
 export function useCreateTransaction() {
