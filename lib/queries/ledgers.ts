@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { supabase } from '../supabase/client';
+import { listLocalLedgers } from '../db/ledgers';
 
 export type LedgerSummary = {
   id: string;
@@ -13,64 +13,27 @@ export type LedgerSummary = {
 };
 
 /**
- * Lists every ledger the signed-in user can see — their own plus any
- * they've been invited to. Mirrors the shape of the web app's
- * `listLedgersForUser` so screens can share types eventually.
+ * Reads the cached ledger list out of SQLite. SyncProvider's pull
+ * refreshes the cache and invalidates `['local-ledgers']` to push the
+ * fresh rows here.
+ *
+ * Same return shape as the previous Supabase-direct hook so screens
+ * don't need to change.
  */
-async function fetchLedgers(): Promise<LedgerSummary[]> {
-  const { data: own, error: ownErr } = await supabase
-    .from('ledgers')
-    .select('id, name, icon, color, currency, is_personal, owner_id');
-  if (ownErr) throw ownErr;
-
-  const userId = (await supabase.auth.getUser()).data.user?.id;
-
-  const owned: LedgerSummary[] = (own ?? [])
-    .filter((l) => l.owner_id === userId)
-    .map((l) => ({
-      id: l.id,
-      name: l.name,
-      icon: l.icon,
-      color: l.color,
-      currency: l.currency ?? 'THB',
-      is_personal: l.is_personal,
-      role: 'owner' as const,
-    }));
-
-  const { data: shared, error: shErr } = await supabase
-    .from('ledger_members')
-    .select(
-      'role, ledgers!inner(id, name, icon, color, currency, is_personal, owner_id)',
-    );
-  if (shErr) throw shErr;
-
-  const sharedRows: LedgerSummary[] = (shared ?? []).flatMap((row) => {
-    const lRaw = row.ledgers as unknown;
-    const l = Array.isArray(lRaw) ? lRaw[0] : lRaw;
-    if (!l) return [];
-    return [
-      {
-        id: l.id,
-        name: l.name,
-        icon: l.icon,
-        color: l.color,
-        currency: l.currency ?? 'THB',
-        is_personal: l.is_personal,
-        role: row.role as LedgerSummary['role'],
-      },
-    ];
-  });
-
-  // De-dupe by id (a user who owns a ledger they're also a member of
-  // shouldn't appear twice).
-  const seen = new Set<string>();
-  return [...owned, ...sharedRows].filter((l) => {
-    if (seen.has(l.id)) return false;
-    seen.add(l.id);
-    return true;
-  });
-}
-
 export function useLedgers() {
-  return useQuery({ queryKey: ['ledgers'], queryFn: fetchLedgers });
+  return useQuery<LedgerSummary[]>({
+    queryKey: ['local-ledgers'],
+    queryFn: async () => {
+      const rows = await listLocalLedgers();
+      return rows.map((r) => ({
+        id: r.id,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        currency: r.currency,
+        is_personal: r.is_personal === 1,
+        role: r.role,
+      }));
+    },
+  });
 }

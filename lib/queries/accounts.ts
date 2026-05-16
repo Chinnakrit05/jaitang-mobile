@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { supabase } from '../supabase/client';
+import { listLocalAccounts } from '../db/accounts';
 
 export type Account = {
   id: string;
@@ -14,26 +14,30 @@ export type Account = {
   archived: boolean;
 };
 
-async function fetchAccounts(ledgerId: string): Promise<Account[]> {
-  const { data, error } = await supabase
-    .from('accounts')
-    .select(
-      'id, ledger_id, name, type, icon, color, currency, initial_balance, archived',
-    )
-    .eq('ledger_id', ledgerId)
-    .eq('archived', false)
-    .order('sort_order', { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((a) => ({
-    ...a,
-    initial_balance: Number(a.initial_balance),
-  }));
-}
-
-export function useAccounts(ledgerId: string | undefined) {
-  return useQuery({
-    queryKey: ['accounts', ledgerId],
-    queryFn: () => fetchAccounts(ledgerId!),
+/**
+ * Reads the cached account list out of SQLite for the given ledger.
+ * SyncProvider invalidates `['local-accounts']` after each pull.
+ */
+export function useAccounts(
+  ledgerId: string | undefined,
+  opts: { includeArchived?: boolean } = {},
+) {
+  return useQuery<Account[]>({
+    queryKey: ['local-accounts', ledgerId, opts.includeArchived ?? false],
+    queryFn: async () => {
+      const rows = await listLocalAccounts(ledgerId!, opts);
+      return rows.map((r) => ({
+        id: r.id,
+        ledger_id: r.ledger_id,
+        name: r.name,
+        type: r.type,
+        icon: r.icon,
+        color: r.color,
+        currency: r.currency,
+        initial_balance: r.initial_balance,
+        archived: r.archived === 1,
+      }));
+    },
     enabled: !!ledgerId,
   });
 }

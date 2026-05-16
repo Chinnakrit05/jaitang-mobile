@@ -12,11 +12,12 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  *     'pending_create' / 'pending_update' / 'pending_delete'. The push
  *     loop scans for non-clean rows and uploads them.
  *
- * Phase A wires this up for `transactions` only; other tables fall
- * through to direct Supabase calls until Phase D ports them.
+ * Phase A covered `transactions`. Phase D adds the read-mostly trio
+ * `categories`, `accounts`, `ledgers` — pull-only for now (writes
+ * still hit Supabase directly until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -48,6 +49,60 @@ const STATEMENTS = [
 
   `CREATE INDEX IF NOT EXISTS idx_tx_ledger ON transactions(ledger_id, occurred_at DESC) WHERE deleted_at IS NULL`,
   `CREATE INDEX IF NOT EXISTS idx_tx_pending ON transactions(_sync_state) WHERE _sync_state != 'clean'`,
+
+  // ---- Phase D mirror tables (pull-only) ----
+  `CREATE TABLE IF NOT EXISTS categories (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('income','expense')),
+    sort_order INTEGER NOT NULL DEFAULT 0,
+    parent_id TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_cat_ledger ON categories(ledger_id, kind, sort_order) WHERE deleted_at IS NULL`,
+
+  `CREATE TABLE IF NOT EXISTS accounts (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    type TEXT NOT NULL,
+    icon TEXT,
+    color TEXT,
+    initial_balance REAL NOT NULL DEFAULT 0,
+    currency TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_acc_ledger ON accounts(ledger_id) WHERE deleted_at IS NULL AND archived = 0`,
+
+  // `role` ('owner'|'editor'|'viewer') comes from one of two server-side
+  // sources: the row's own `owner_id` (→ 'owner') or the matching
+  // `ledger_members.role`. The pull resolves it before insert so callers
+  // don't have to join again.
+  `CREATE TABLE IF NOT EXISTS ledgers (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT,
+    currency TEXT NOT NULL DEFAULT 'THB',
+    owner_id TEXT NOT NULL,
+    is_personal INTEGER NOT NULL DEFAULT 0,
+    role TEXT NOT NULL CHECK (role IN ('owner','editor','viewer')),
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_ledger_active ON ledgers(is_personal DESC, created_at) WHERE deleted_at IS NULL`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

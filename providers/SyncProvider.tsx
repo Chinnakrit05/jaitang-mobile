@@ -2,9 +2,12 @@ import { createContext, useContext, useEffect, useRef, useState, type ReactNode 
 import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from './AuthProvider';
-import { useLedgers } from '../lib/queries/ledgers';
 import { isOnlineNow, useNetworkStatus } from '../lib/network';
 import { syncTransactions } from '../lib/sync/transactions';
+import { pullLedgers } from '../lib/sync/ledgers';
+import { pullCategories } from '../lib/sync/categories';
+import { pullAccounts } from '../lib/sync/accounts';
+import { listLocalLedgers } from '../lib/db/ledgers';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
 
@@ -25,18 +28,16 @@ const Ctx = createContext<SyncCtx>({
 const POLL_INTERVAL_MS = 30_000;
 
 /**
- * Drives the offline sync loop. Once the user is signed in and the
- * ledgers list is available, schedules a sync every 30s; also fires
- * immediately on app boot and whenever network reachability flips
- * from offline → online so a freshly-reconnected device catches up
- * without waiting out the timer.
+ * Drives the offline sync loop. Pulls ledgers first (uses the session
+ * directly — no local-data dependency to bootstrap from), then derives
+ * the user's ledger ids from the freshly-updated local mirror to fan
+ * out into categories / accounts / transactions.
  *
- * Currently covers `transactions` only. Adding tables means importing
- * their `sync*()` and chaining the calls in `runOnce`.
+ * Schedule: fires immediately on sign-in, every 30 s after that, and
+ * again the moment network reachability flips from offline → online.
  */
 export function SyncProvider({ children }: { children: ReactNode }) {
   const { session } = useAuth();
-  const ledgers = useLedgers();
   const { isOnline } = useNetworkStatus();
   const qc = useQueryClient();
   const [status, setStatus] = useState<SyncStatus>('idle');
@@ -44,21 +45,39 @@ export function SyncProvider({ children }: { children: ReactNode }) {
   const inflight = useRef(false);
   const wasOffline = useRef(false);
 
-  const ledgerIds = (ledgers.data ?? []).map((l) => l.id);
-
   async function runOnce() {
     if (inflight.current) return;
-    if (!session || ledgerIds.length === 0) return;
+    if (!session) return;
     if (!(await isOnlineNow())) return;
     inflight.current = true;
     setStatus('syncing');
     try {
-      const result = await syncTransactions({ ledgerIds });
+      // 1. Ledgers first — no local-data dependency, drives everything else.
+      const ledgerResult = await pullLedgers();
+
+      // 2. Derive ledger ids from the local mirror that was just refreshed.
+      const localLedgers = await listLocalLedgers();
+      const ledgerIds = localLedgers.map((l) => l.id);
+
+      // 3. Per-ledger pulls (categories + accounts in parallel — both are
+      // small, both are read-only).
+      const [catResult, accResult] = await Promise.all([
+        pullCategories({ ledgerIds }),
+        pullAccounts({ ledgerIds }),
+      ]);
+
+      // 4. Transactions last (push-then-pull, may take longer).
+      const txResult = await syncTransactions({ ledgerIds });
+
       setLastSyncedAt(new Date());
       setStatus('idle');
-      // Bump cached local-DB queries when the store actually changed so
-      // screens re-read the freshly-merged rows.
-      if (result.pulled > 0 || result.pushed > 0) {
+
+      // Bump caches that actually saw work. Each hook lives behind its
+      // own query key so consumers only re-render when their table moved.
+      if (ledgerResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-ledgers'] });
+      if (catResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-categories'] });
+      if (accResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      if (txResult.pulled > 0 || txResult.pushed > 0) {
         qc.invalidateQueries({ queryKey: ['local-tx'] });
       }
     } catch {
@@ -68,14 +87,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
     }
   }
 
-  // Boot + poll.
+  // Boot + poll. Re-runs when the user signs in/out.
   useEffect(() => {
-    if (!session || ledgerIds.length === 0) return;
+    if (!session) return;
     runOnce();
     const t = setInterval(runOnce, POLL_INTERVAL_MS);
     return () => clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [session, ledgerIds.join(',')]);
+  }, [session?.user.id]);
 
   // Resume sync the moment the device comes back online.
   useEffect(() => {

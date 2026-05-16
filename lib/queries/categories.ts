@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 
-import { supabase } from '../supabase/client';
+import { listLocalCategories } from '../db/categories';
 
 export type Category = {
   id: string;
@@ -13,21 +13,27 @@ export type Category = {
   parent_id: string | null;
 };
 
-async function fetchCategories(ledgerId: string): Promise<Category[]> {
-  const { data, error } = await supabase
-    .from('categories')
-    .select('id, ledger_id, name, icon, color, kind, sort_order, parent_id')
-    .eq('ledger_id', ledgerId)
-    .order('kind', { ascending: true })
-    .order('sort_order', { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((c) => ({ ...c, parent_id: c.parent_id ?? null }));
-}
-
+/**
+ * Reads the cached category list out of SQLite for the given ledger.
+ * Returns the same shape the previous Supabase-direct hook exposed.
+ * SyncProvider invalidates `['local-categories']` after each pull.
+ */
 export function useCategories(ledgerId: string | undefined) {
-  return useQuery({
-    queryKey: ['categories', ledgerId],
-    queryFn: () => fetchCategories(ledgerId!),
+  return useQuery<Category[]>({
+    queryKey: ['local-categories', ledgerId],
+    queryFn: async () => {
+      const rows = await listLocalCategories(ledgerId!);
+      return rows.map((r) => ({
+        id: r.id,
+        ledger_id: r.ledger_id,
+        name: r.name,
+        icon: r.icon,
+        color: r.color,
+        kind: r.kind,
+        sort_order: r.sort_order,
+        parent_id: r.parent_id,
+      }));
+    },
     enabled: !!ledgerId,
   });
 }
