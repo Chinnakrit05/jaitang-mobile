@@ -7,6 +7,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '../providers/AuthProvider';
+import { ActiveLedgerProvider } from '../providers/ActiveLedgerProvider';
 import { QueryProvider } from '../providers/QueryProvider';
 import { IconStyleProvider } from '../components/icons/IconStyleContext';
 
@@ -21,10 +22,12 @@ export default function RootLayout() {
       <SafeAreaProvider>
         <QueryProvider>
           <AuthProvider>
-            <IconStyleProvider>
-              <StatusBar style="auto" />
-              <Stack screenOptions={{ headerShown: false }} />
-            </IconStyleProvider>
+            <ActiveLedgerProvider>
+              <IconStyleProvider>
+                <StatusBar style="auto" />
+                <Stack screenOptions={{ headerShown: false }} />
+              </IconStyleProvider>
+            </ActiveLedgerProvider>
           </AuthProvider>
         </QueryProvider>
       </SafeAreaProvider>
