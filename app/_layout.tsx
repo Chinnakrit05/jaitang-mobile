@@ -9,6 +9,7 @@ import { StatusBar } from 'expo-status-bar';
 import { AuthProvider } from '../providers/AuthProvider';
 import { ActiveLedgerProvider } from '../providers/ActiveLedgerProvider';
 import { QueryProvider } from '../providers/QueryProvider';
+import { SyncProvider } from '../providers/SyncProvider';
 import { IconStyleProvider } from '../components/icons/IconStyleContext';
 
 /**
@@ -23,10 +24,12 @@ export default function RootLayout() {
         <QueryProvider>
           <AuthProvider>
             <ActiveLedgerProvider>
-              <IconStyleProvider>
-                <StatusBar style="auto" />
-                <Stack screenOptions={{ headerShown: false }} />
-              </IconStyleProvider>
+              <SyncProvider>
+                <IconStyleProvider>
+                  <StatusBar style="auto" />
+                  <Stack screenOptions={{ headerShown: false }} />
+                </IconStyleProvider>
+              </SyncProvider>
             </ActiveLedgerProvider>
           </AuthProvider>
         </QueryProvider>

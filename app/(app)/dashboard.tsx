@@ -7,6 +7,7 @@ import { signOut } from '../../lib/auth';
 import { useMonthTransactions } from '../../lib/queries/transactions';
 import { formatCurrency } from '../../lib/format';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
+import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 
 /**
  * Placeholder dashboard — proves Supabase RLS + active-ledger selection
@@ -37,6 +38,9 @@ export default function DashboardScreen() {
           <Text className="text-base font-medium mt-0.5">
             {session?.user.email ?? '—'}
           </Text>
+          <View className="mt-1.5">
+            <SyncStatusBadge />
+          </View>
         </View>
 
         {ledgerLoading ? (
