@@ -54,6 +54,13 @@ export default function AppLayout() {
           tabBarIcon: ({ size }) => <Tab name="ledgers" size={size} />,
         }}
       />
+      <Tabs.Screen
+        name="settings"
+        options={{
+          title: 'Settings',
+          tabBarIcon: ({ size }) => <Tab name="settings" size={size} />,
+        }}
+      />
     </Tabs>
   );
 }

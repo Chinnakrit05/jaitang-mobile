@@ -1,9 +1,8 @@
-import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
-import { signOut } from '../../lib/auth';
 import { useLocalMonthTransactions } from '../../lib/queries/transactions-local';
 import { formatCurrency } from '../../lib/format';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
@@ -12,8 +11,8 @@ import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 /**
  * Placeholder dashboard — proves Supabase RLS + active-ledger selection
  * end-to-end. UI design will replace this entirely; for now it shows the
- * signed-in email, the active ledger, this-month totals, and a sign-out
- * button.
+ * signed-in email, the active ledger, and this-month totals. Account
+ * actions (icon style, language, sign-out) live in the Settings tab.
  */
 export default function DashboardScreen() {
   const { session } = useAuth();
@@ -90,12 +89,6 @@ export default function DashboardScreen() {
           </Text>
         )}
 
-        <Pressable
-          onPress={() => signOut()}
-          className="self-start px-4 py-2 rounded-lg border border-zinc-200 active:opacity-60"
-        >
-          <Text className="text-sm">Sign out</Text>
-        </Pressable>
       </ScrollView>
     </SafeAreaView>
   );
