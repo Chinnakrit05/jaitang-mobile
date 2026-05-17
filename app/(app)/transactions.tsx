@@ -2,9 +2,9 @@ import { useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  FlatList,
   Pressable,
   ScrollView,
-  SectionList,
   Text,
   View,
 } from 'react-native';
@@ -12,6 +12,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import Svg, { Circle, Path } from 'react-native-svg';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useTheme } from '../../providers/ThemeProvider';
 import {
   useDeleteTransaction,
   useLocalTransactions,
@@ -34,6 +35,10 @@ import { ShibaMascot } from '../../components/ShibaMascot';
  *
  * Long-press a row to delete — the only edit affordance until a real
  * edit screen lands.
+ *
+ * Colors come from `useTheme()` so the screen tracks light / dark / OLED
+ * automatically. Constants are computed inside the component because
+ * `useTheme()` is a hook — they can't sit at module scope anymore.
  */
 
 const THAI_MONTH_SHORT = [
@@ -59,13 +64,42 @@ function formatTHB(n: number) {
   return Math.round(Math.abs(n)).toLocaleString('en-US');
 }
 
-const ACCENT = '#D98556';
-const TEXT_PRIMARY = '#3D2A1E';
-const TEXT_MUTED = '#8B7563';
-const BG_PAGE = '#FFF4E6';
-const BG_CHIP = '#FFE4C7';
-const BG_CARD = '#FFFFFF';
-const INCOME_GREEN = '#0F8A4E';
+// Tiny chip label for the row's payment-method tag. Returns null when
+// the row didn't capture one (legacy data) so we skip the separator dot.
+function paymentLabel(method: 'cash' | 'transfer' | null): string | null {
+  if (method === 'cash') return '💵 เงินสด';
+  if (method === 'transfer') return '🏦 โอน';
+  return null;
+}
+
+// Pastel tints for the round category icon. Each category id hashes to
+// a stable index so the same category always picks the same color. The
+// rgba alpha matches the mockup's "soft chip" feel — vivid enough to
+// distinguish at a glance, gentle enough not to compete with the row's
+// text. Income kind always lands on green so salary / refund rows pop
+// out from regular expenses.
+const ICON_TINTS = [
+  'rgba(255, 123, 172, 0.20)',  // pink
+  'rgba(251, 191, 36, 0.20)',   // yellow
+  'rgba(167, 139, 250, 0.20)',  // lavender
+  'rgba(96, 165, 250, 0.20)',   // sky
+  'rgba(251, 146, 60, 0.20)',   // orange
+];
+const ICON_TINT_INCOME = 'rgba(52, 211, 153, 0.22)'; // mint green
+const ICON_TINT_NEUTRAL = 'rgba(61, 42, 30, 0.06)';   // for uncategorized
+
+function categoryTint(
+  categoryId: string | null,
+  kind: 'income' | 'expense',
+): string {
+  if (kind === 'income') return ICON_TINT_INCOME;
+  if (!categoryId) return ICON_TINT_NEUTRAL;
+  let hash = 0;
+  for (let i = 0; i < categoryId.length; i++) {
+    hash = (hash + categoryId.charCodeAt(i)) >>> 0;
+  }
+  return ICON_TINTS[hash % ICON_TINTS.length];
+}
 
 function SearchIcon({ color, size }: { color: string; size: number }) {
   return (
@@ -86,17 +120,15 @@ export default function TransactionsScreen() {
   const txs = useLocalTransactions({ ledgerId: ledger?.id, limit: 500 });
   const cats = useCategories(ledger?.id);
   const del = useDeleteTransaction();
+  const c = useTheme().colors;
 
-  const [activeFilter, setActiveFilter] = useState<string | null>(null); // category_id or null = all
+  const [activeFilter, setActiveFilter] = useState<string | null>(null);
 
   const catById = useMemo(
     () => new Map((cats.data ?? []).map((c) => [c.id, c])),
     [cats.data],
   );
 
-  // Top categories *of this month* — feeds the filter chip row. We
-  // pick from real data so the chips reflect the user's actual usage
-  // rather than every category they ever defined.
   const monthScope = useMemo(() => {
     const now = new Date();
     const from = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
@@ -122,7 +154,6 @@ export default function TransactionsScreen() {
       .filter((c): c is { id: string; name: string; icon: string | null } => !!c);
   }, [monthScope, catById]);
 
-  // Month totals (income / expense / count) — feeds the summary banner.
   const monthIncome = monthScope
     .filter((t) => t.kind === 'income')
     .reduce((s, t) => s + t.amount, 0);
@@ -131,8 +162,6 @@ export default function TransactionsScreen() {
     .reduce((s, t) => s + t.amount, 0);
   const monthCount = monthScope.length;
 
-  // Filtered list + grouping by day. We show all months in the
-  // list (not just this month) — chips filter category, not period.
   const sections = useMemo(() => {
     const filtered = activeFilter
       ? (txs.data ?? []).filter((t) => t.category_id === activeFilter)
@@ -180,9 +209,9 @@ export default function TransactionsScreen() {
     return (
       <SafeAreaView
         className="flex-1 items-center justify-center"
-        style={{ backgroundColor: BG_PAGE }}
+        style={{ backgroundColor: c.bg }}
       >
-        <ActivityIndicator />
+        <ActivityIndicator color={c.accent} />
       </SafeAreaView>
     );
   }
@@ -190,9 +219,9 @@ export default function TransactionsScreen() {
     return (
       <SafeAreaView
         className="flex-1 items-center justify-center p-4"
-        style={{ backgroundColor: BG_PAGE }}
+        style={{ backgroundColor: c.bg }}
       >
-        <Text style={{ color: '#D98556' }}>{String(txs.error)}</Text>
+        <Text style={{ color: c.expense }}>{String(txs.error)}</Text>
       </SafeAreaView>
     );
   }
@@ -200,9 +229,9 @@ export default function TransactionsScreen() {
     return (
       <SafeAreaView
         className="flex-1 items-center justify-center"
-        style={{ backgroundColor: BG_PAGE }}
+        style={{ backgroundColor: c.bg }}
       >
-        <Text style={{ color: TEXT_MUTED }}>ยังไม่มีสมุดบัญชี</Text>
+        <Text style={{ color: c.textSecondary }}>ยังไม่มีสมุดบัญชี</Text>
       </SafeAreaView>
     );
   }
@@ -210,21 +239,19 @@ export default function TransactionsScreen() {
   return (
     <SafeAreaView
       className="flex-1"
-      style={{ backgroundColor: BG_PAGE }}
+      style={{ backgroundColor: c.bg }}
       edges={['top']}
     >
-      <SectionList
-        sections={sections}
-        keyExtractor={(t) => t.id}
-        stickySectionHeadersEnabled={false}
+      <FlatList
+        data={sections}
+        keyExtractor={(section) => section.title}
         contentContainerStyle={{ paddingBottom: 96 }}
+        ItemSeparatorComponent={() => <View style={{ height: 8 }} />}
         ListHeaderComponent={
           <View style={{ padding: 16, gap: 14 }}>
             {/* Header */}
             <View className="flex-row items-center justify-between">
-              <Text
-                style={{ color: TEXT_PRIMARY, fontSize: 22, fontWeight: '700' }}
-              >
+              <Text style={{ color: c.text, fontSize: 22, fontWeight: '700' }}>
                 รายการของฉัน
               </Text>
               <Pressable
@@ -237,49 +264,48 @@ export default function TransactionsScreen() {
                   borderRadius: 18,
                   alignItems: 'center',
                   justifyContent: 'center',
-                  backgroundColor: BG_CARD,
+                  backgroundColor: c.card,
                 }}
               >
-                <SearchIcon color={TEXT_PRIMARY} size={18} />
+                <SearchIcon color={c.text} size={18} />
               </Pressable>
             </View>
 
-            {/* Summary banner */}
+            {/* Summary banner — shiba avatar (in soft peach circle) +
+                count text + plain colored amounts (no pill bg). */}
             <View
               className="rounded-2xl p-4 flex-row items-center gap-3"
-              style={{ backgroundColor: BG_CARD }}
+              style={{ backgroundColor: c.card }}
             >
-              <ShibaMascot size={48} />
+              <View
+                style={{
+                  width: 48,
+                  height: 48,
+                  borderRadius: 24,
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  overflow: 'hidden',
+                  backgroundColor: c.cardElevated,
+                }}
+              >
+                <ShibaMascot size={48} />
+              </View>
               <View className="flex-1">
-                <Text style={{ color: TEXT_PRIMARY, fontSize: 13 }}>
+                <Text style={{ color: c.text, fontSize: 13 }}>
                   เดือนนี้คุณมีรายการ{' '}
                   <Text style={{ fontWeight: '700' }}>{monthCount}</Text> รายการ
                 </Text>
-                <View className="flex-row gap-2 mt-1.5">
-                  <View
-                    className="px-2.5 py-1 rounded-full"
-                    style={{ backgroundColor: 'rgba(52, 211, 153, 0.18)' }}
+                <View className="flex-row gap-3 mt-1">
+                  <Text
+                    style={{ color: c.income, fontSize: 13, fontWeight: '700' }}
                   >
-                    <Text
-                      style={{
-                        color: INCOME_GREEN,
-                        fontSize: 11,
-                        fontWeight: '600',
-                      }}
-                    >
-                      +฿{formatTHB(monthIncome)}
-                    </Text>
-                  </View>
-                  <View
-                    className="px-2.5 py-1 rounded-full"
-                    style={{ backgroundColor: 'rgba(255, 123, 172, 0.18)' }}
+                    +฿{formatTHB(monthIncome)}
+                  </Text>
+                  <Text
+                    style={{ color: c.text, fontSize: 13, fontWeight: '700' }}
                   >
-                    <Text
-                      style={{ color: ACCENT, fontSize: 11, fontWeight: '600' }}
-                    >
-                      −฿{formatTHB(monthExpense)}
-                    </Text>
-                  </View>
+                    −฿{formatTHB(monthExpense)}
+                  </Text>
                 </View>
               </View>
             </View>
@@ -294,128 +320,171 @@ export default function TransactionsScreen() {
                 label="ทั้งหมด"
                 active={activeFilter === null}
                 onPress={() => setActiveFilter(null)}
+                colors={c}
               />
-              {filterChips.map((c) => (
+              {filterChips.map((cat) => (
                 <Chip
-                  key={c.id}
-                  label={c.name}
-                  icon={c.icon}
-                  active={activeFilter === c.id}
+                  key={cat.id}
+                  label={cat.name}
+                  icon={cat.icon}
+                  active={activeFilter === cat.id}
                   onPress={() =>
-                    setActiveFilter(activeFilter === c.id ? null : c.id)
+                    setActiveFilter(activeFilter === cat.id ? null : cat.id)
                   }
+                  colors={c}
                 />
               ))}
             </ScrollView>
           </View>
         }
-        renderSectionHeader={({ section }) => {
+        renderItem={({ item: section }) => {
+          // Each "item" of this FlatList is a whole date section. The
+          // date header + every transaction row of that day live inside
+          // a SINGLE white card so the corners + hairlines stay tight —
+          // SectionList's renderSectionHeader was leaving a stray gap
+          // between header and the first item that no amount of padding
+          // could close.
           const sign = section.allExpenses
             ? ''
             : section.net >= 0
               ? '+'
               : '−';
-          const color = section.allExpenses
-            ? TEXT_PRIMARY
+          const totalColor = section.allExpenses
+            ? c.text
             : section.net >= 0
-              ? INCOME_GREEN
-              : TEXT_PRIMARY;
-          return (
-            <View
-              className="flex-row items-center justify-between px-4 pt-3 pb-1.5"
-            >
-              <Text
-                style={{ color: TEXT_MUTED, fontSize: 12, fontWeight: '600' }}
-              >
-                {formatThaiDay(section.title + 'T00:00:00')}
-              </Text>
-              <Text style={{ color, fontSize: 13, fontWeight: '700' }}>
-                {sign}฿{formatTHB(section.net)}
-              </Text>
-            </View>
-          );
-        }}
-        renderItem={({ item, index, section }) => {
-          const cat = item.category_id ? catById.get(item.category_id) : null;
-          const isFirst = index === 0;
-          const isLast = index === section.data.length - 1;
+              ? c.income
+              : c.text;
           return (
             <View className="px-4">
-              <Pressable
-                onLongPress={() => confirmDelete(item)}
-                delayLongPress={350}
+              <View
                 style={{
-                  backgroundColor: BG_CARD,
-                  paddingHorizontal: 14,
-                  paddingVertical: 12,
-                  borderTopLeftRadius: isFirst ? 16 : 0,
-                  borderTopRightRadius: isFirst ? 16 : 0,
-                  borderBottomLeftRadius: isLast ? 16 : 0,
-                  borderBottomRightRadius: isLast ? 16 : 0,
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  gap: 12,
-                  opacity: item._sync_state !== 'clean' ? 0.7 : 1,
-                  borderTopWidth: isFirst ? 0 : 1,
-                  borderTopColor: 'rgba(217, 133, 86, 0.08)',
+                  backgroundColor: c.card,
+                  borderRadius: 18,
+                  overflow: 'hidden',
                 }}
               >
+                {/* Date header row */}
                 <View
-                  className="w-10 h-10 rounded-full items-center justify-center"
-                  style={{ backgroundColor: BG_PAGE }}
-                >
-                  <EmojiOrIcon
-                    value={cat?.icon}
-                    fallback="sparkle"
-                    size={20}
-                  />
-                </View>
-                <View className="flex-1 min-w-0">
-                  <Text
-                    numberOfLines={1}
-                    style={{
-                      color: TEXT_PRIMARY,
-                      fontSize: 14,
-                      fontWeight: '500',
-                    }}
-                  >
-                    {item.note?.trim() || cat?.name || 'รายการ'}
-                  </Text>
-                  <Text
-                    style={{ color: TEXT_MUTED, fontSize: 11, marginTop: 1 }}
-                  >
-                    {cat?.name ?? (item.kind === 'income' ? 'รายรับ' : 'อื่นๆ')}
-                    <Text> · </Text>
-                    {formatTime(item.occurred_at)}
-                    {item._sync_state !== 'clean' ? (
-                      <Text style={{ color: ACCENT }}> · กำลังซิงค์</Text>
-                    ) : null}
-                  </Text>
-                </View>
-                <Text
                   style={{
-                    color: item.kind === 'income' ? INCOME_GREEN : TEXT_PRIMARY,
-                    fontSize: 14,
-                    fontWeight: '700',
+                    paddingHorizontal: 16,
+                    paddingVertical: 12,
+                    flexDirection: 'row',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
                   }}
                 >
-                  {item.kind === 'income' ? '+' : '−'}฿{formatTHB(item.amount)}
-                </Text>
-              </Pressable>
+                  <Text
+                    style={{ color: c.text, fontSize: 13, fontWeight: '700' }}
+                  >
+                    {formatThaiDay(section.title + 'T00:00:00')}
+                  </Text>
+                  <Text
+                    style={{
+                      color: totalColor,
+                      fontSize: 13,
+                      fontWeight: '700',
+                    }}
+                  >
+                    {sign}฿{formatTHB(section.net)}
+                  </Text>
+                </View>
+
+                {/* Transaction rows */}
+                {section.data.map((item) => {
+                  const cat = item.category_id
+                    ? catById.get(item.category_id)
+                    : null;
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onLongPress={() => confirmDelete(item)}
+                      delayLongPress={350}
+                      style={{
+                        paddingHorizontal: 14,
+                        paddingVertical: 12,
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        gap: 12,
+                        opacity: item._sync_state !== 'clean' ? 0.7 : 1,
+                        borderTopWidth: 1,
+                        borderTopColor: c.border,
+                      }}
+                    >
+                      <View
+                        className="w-10 h-10 rounded-full items-center justify-center"
+                        style={{
+                          backgroundColor: categoryTint(
+                            item.category_id,
+                            item.kind,
+                          ),
+                        }}
+                      >
+                        <EmojiOrIcon
+                          value={cat?.icon}
+                          fallback="sparkle"
+                          size={20}
+                        />
+                      </View>
+                      <View className="flex-1 min-w-0">
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: c.text,
+                            fontSize: 14,
+                            fontWeight: '500',
+                          }}
+                        >
+                          {item.note?.trim() || cat?.name || 'รายการ'}
+                        </Text>
+                        <Text
+                          style={{
+                            color: c.textMuted,
+                            fontSize: 11,
+                            marginTop: 1,
+                          }}
+                        >
+                          {cat?.name ??
+                            (item.kind === 'income' ? 'รายรับ' : 'อื่นๆ')}
+                          {paymentLabel(item.payment_method) ? (
+                            <Text>
+                              <Text> · </Text>
+                              {paymentLabel(item.payment_method)}
+                            </Text>
+                          ) : null}
+                          <Text> · </Text>
+                          {formatTime(item.occurred_at)}
+                          {item._sync_state !== 'clean' ? (
+                            <Text style={{ color: c.accent }}>
+                              {' · กำลังซิงค์'}
+                            </Text>
+                          ) : null}
+                        </Text>
+                      </View>
+                      <Text
+                        style={{
+                          color: item.kind === 'income' ? c.income : c.text,
+                          fontSize: 14,
+                          fontWeight: '700',
+                        }}
+                      >
+                        {item.kind === 'income' ? '+' : '−'}฿
+                        {formatTHB(item.amount)}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
             </View>
           );
         }}
-        SectionSeparatorComponent={() => <View style={{ height: 4 }} />}
         ListEmptyComponent={
           <View className="p-10 items-center">
             <Text style={{ fontSize: 36 }}>🌸</Text>
-            <Text
-              style={{ color: TEXT_PRIMARY, fontSize: 14, marginTop: 8 }}
-            >
+            <Text style={{ color: c.text, fontSize: 14, marginTop: 8 }}>
               ยังไม่มีรายการ
             </Text>
             <Text
-              style={{ color: TEXT_MUTED, fontSize: 12, marginTop: 4 }}
+              style={{ color: c.textSecondary, fontSize: 12, marginTop: 4 }}
             >
               {activeFilter
                 ? 'หมวดนี้ยังไม่มีรายการ — ลองเลือก "ทั้งหมด"'
@@ -433,20 +502,25 @@ function Chip({
   icon,
   active,
   onPress,
+  colors,
 }: {
   label: string;
   icon?: string | null;
   active: boolean;
   onPress: () => void;
+  colors: ReturnType<typeof useTheme>['colors'];
 }) {
+  // Filter chips have their own active style — dark brown fill, white
+  // text — instead of the theme's accent orange. The mockup uses this
+  // to keep the filter row distinct from the rest of the CTA orange.
   return (
     <Pressable
       onPress={onPress}
       style={{
         paddingHorizontal: 14,
-        paddingVertical: 7,
+        paddingVertical: 8,
         borderRadius: 999,
-        backgroundColor: active ? ACCENT : BG_CHIP,
+        backgroundColor: active ? colors.text : colors.card,
         flexDirection: 'row',
         alignItems: 'center',
         gap: 5,
@@ -455,7 +529,7 @@ function Chip({
       {icon ? <EmojiOrIcon value={icon} fallback="sparkle" size={14} /> : null}
       <Text
         style={{
-          color: active ? '#FFFFFF' : TEXT_PRIMARY,
+          color: active ? '#FFFFFF' : colors.text,
           fontSize: 12,
           fontWeight: active ? '700' : '600',
         }}

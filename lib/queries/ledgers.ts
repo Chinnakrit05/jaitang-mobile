@@ -48,6 +48,56 @@ export type NewLedgerInput = {
   is_personal?: boolean;
 };
 
+export type UpdateLedgerInput = {
+  id: string;
+  name: string;
+  icon: string | null;
+  color: string | null;
+  currency: string;
+};
+
+/**
+ * Update ledger metadata (name / icon / color / currency). Server-side
+ * enforces "only the owner can update". After success we re-pull so the
+ * local mirror picks up the new values.
+ */
+export function useUpdateLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateLedgerInput) => {
+      const { error } = await supabase.rpc('update_ledger', {
+        p_id: input.id,
+        p_name: input.name,
+        p_icon: input.icon,
+        p_color: input.color,
+        p_currency: input.currency,
+      });
+      if (error) throw error;
+      await pullLedgers();
+      await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
+      await qc.refetchQueries({ queryKey: ['local-ledgers'] });
+    },
+  });
+}
+
+/**
+ * Soft-delete a ledger (only owner). Transactions / categories stay in
+ * the DB but the ledger row gets `deleted_at` set; pullLedgers picks
+ * up the tombstone and `listLocalLedgers` filters it out.
+ */
+export function useDeleteLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.rpc('delete_ledger', { p_id: id });
+      if (error) throw error;
+      await pullLedgers();
+      await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
+      await qc.refetchQueries({ queryKey: ['local-ledgers'] });
+    },
+  });
+}
+
 /**
  * Creates a ledger by calling the `create_ledger` Postgres function
  * (SECURITY DEFINER). The function bypasses the ledger-member RLS

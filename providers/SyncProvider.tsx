@@ -7,6 +7,7 @@ import { syncTransactions } from '../lib/sync/transactions';
 import { pullLedgers } from '../lib/sync/ledgers';
 import { pullCategories } from '../lib/sync/categories';
 import { pullAccounts } from '../lib/sync/accounts';
+import { pullRecurring } from '../lib/sync/recurring';
 import { listLocalLedgers } from '../lib/db/ledgers';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
@@ -59,11 +60,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const localLedgers = await listLocalLedgers();
       const ledgerIds = localLedgers.map((l) => l.id);
 
-      // 3. Per-ledger pulls (categories + accounts in parallel — both are
-      // small, both are read-only).
-      const [catResult, accResult] = await Promise.all([
+      // 3. Per-ledger pulls (categories + accounts + recurring in
+      // parallel — all small, all read-only mirrors).
+      const [catResult, accResult, recResult] = await Promise.all([
         pullCategories({ ledgerIds }),
         pullAccounts({ ledgerIds }),
+        pullRecurring({ ledgerIds }),
       ]);
 
       // 4. Transactions last (push-then-pull, may take longer).
@@ -77,6 +79,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (ledgerResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-ledgers'] });
       if (catResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-categories'] });
       if (accResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      if (recResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-recurring'] });
       if (txResult.pulled > 0 || txResult.pushed > 0) {
         qc.invalidateQueries({ queryKey: ['local-tx'] });
       }

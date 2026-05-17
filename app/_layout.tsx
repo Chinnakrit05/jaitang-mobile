@@ -10,6 +10,7 @@ import { AuthProvider } from '../providers/AuthProvider';
 import { ActiveLedgerProvider } from '../providers/ActiveLedgerProvider';
 import { QueryProvider } from '../providers/QueryProvider';
 import { SyncProvider } from '../providers/SyncProvider';
+import { ThemeProvider } from '../providers/ThemeProvider';
 import { IconStyleProvider } from '../components/icons/IconStyleContext';
 
 /**
@@ -21,18 +22,20 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
-        <QueryProvider>
-          <AuthProvider>
-            <ActiveLedgerProvider>
-              <SyncProvider>
-                <IconStyleProvider>
-                  <StatusBar style="auto" />
-                  <Stack screenOptions={{ headerShown: false }} />
-                </IconStyleProvider>
-              </SyncProvider>
-            </ActiveLedgerProvider>
-          </AuthProvider>
-        </QueryProvider>
+        <ThemeProvider>
+          <QueryProvider>
+            <AuthProvider>
+              <ActiveLedgerProvider>
+                <SyncProvider>
+                  <IconStyleProvider>
+                    <StatusBar style="auto" />
+                    <Stack screenOptions={{ headerShown: false }} />
+                  </IconStyleProvider>
+                </SyncProvider>
+              </ActiveLedgerProvider>
+            </AuthProvider>
+          </QueryProvider>
+        </ThemeProvider>
       </SafeAreaProvider>
     </GestureHandlerRootView>
   );

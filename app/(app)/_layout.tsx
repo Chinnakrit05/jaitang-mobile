@@ -34,7 +34,12 @@ export default function AppLayout() {
       <Tabs.Screen name="transactions" />
       <Tabs.Screen name="quick" />
       <Tabs.Screen name="insights" />
-      <Tabs.Screen name="settings" />
+      <Tabs.Screen name="more" />
+      {/* Hidden screens — reachable via router.push but not pinned to
+          the bottom nav. The "more" tab acts as the menu hub. */}
+      <Tabs.Screen name="settings" options={{ href: null }} />
+      <Tabs.Screen name="categories" options={{ href: null }} />
+      <Tabs.Screen name="recurring" options={{ href: null }} />
       <Tabs.Screen name="ledgers" options={{ href: null }} />
       <Tabs.Screen name="onboarding-ledger" options={{ href: null }} />
     </Tabs>

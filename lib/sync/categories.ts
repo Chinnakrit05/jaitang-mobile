@@ -89,3 +89,72 @@ export async function pullCategories(opts: {
   await setSyncState(LAST_PULL_KEY, cursor);
   return { pulled: data?.length ?? 0 };
 }
+
+/**
+ * Full refresh of one ledger's categories — bypasses the incremental
+ * `updated_at > since` cursor. Used by mutations (create / update /
+ * delete / seed) so the local mirror picks up rows we just wrote
+ * server-side even when the device clock is ahead of the server's. The
+ * cursor-based `pullCategories` is fine for the 30s polling loop where
+ * a one-cycle delay doesn't matter; mutations need the row to land
+ * before the next React Query refetch so the UI doesn't lag.
+ *
+ * Does NOT advance LAST_PULL_KEY — the polling loop owns that cursor.
+ */
+export async function refreshLedgerCategories(
+  ledgerId: string,
+): Promise<{ pulled: number }> {
+  const { data, error } = await supabase
+    .from('categories')
+    .select(COLUMNS)
+    .eq('ledger_id', ledgerId);
+  if (error) throw error;
+
+  console.log(
+    '[refreshLedgerCategories]',
+    ledgerId,
+    'pulled',
+    data?.length ?? 0,
+    'rows from server',
+  );
+
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const r of data ?? []) {
+      await db.runAsync(
+        `INSERT INTO categories (
+          id, ledger_id, name, icon, color, kind, sort_order, parent_id,
+          created_at, updated_at, deleted_at, _sync_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'clean')
+        ON CONFLICT(id) DO UPDATE SET
+          ledger_id=excluded.ledger_id,
+          name=excluded.name,
+          icon=excluded.icon,
+          color=excluded.color,
+          kind=excluded.kind,
+          sort_order=excluded.sort_order,
+          parent_id=excluded.parent_id,
+          created_at=excluded.created_at,
+          updated_at=excluded.updated_at,
+          deleted_at=excluded.deleted_at,
+          _sync_state='clean'
+        `,
+        [
+          r.id,
+          r.ledger_id,
+          r.name,
+          r.icon,
+          r.color,
+          r.kind,
+          r.sort_order,
+          r.parent_id,
+          r.created_at,
+          r.updated_at,
+          r.deleted_at,
+        ],
+      );
+    }
+  });
+
+  return { pulled: data?.length ?? 0 };
+}

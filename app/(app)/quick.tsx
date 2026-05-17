@@ -1,54 +1,113 @@
-import { useState } from 'react';
-import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View } from 'react-native';
+import { useMemo, useState } from 'react';
+import {
+  ActivityIndicator,
+  Pressable,
+  ScrollView,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import Svg, { Path } from 'react-native-svg';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useTheme } from '../../providers/ThemeProvider';
 import { useCategories } from '../../lib/queries/categories';
 import { useCreateTransaction } from '../../lib/queries/transactions-local';
-import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
+import { ShibaMascot } from '../../components/ShibaMascot';
+import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
- * Minimal quick-add screen. Big amount input + kind toggle + category
- * chip picker + note. Writes to the local DB immediately (works
- * offline); SyncProvider uploads it on the next pass.
+ * Add Transaction — second-pass redesign to match the latest mockup.
  *
- * Layout is intentionally bare — design comes later. The form fields
- * cover the same shape as the web app's quick-add server action so
- * the AI parser / category suggestion can be ported on top later.
+ * Key visual changes from the previous port:
+ *   - Greeting banner — shiba shrinks into a small circular avatar on
+ *     the left, with a white bubble pill carrying the text.
+ *   - Kind toggle — segmented control where the active option is a
+ *     filled accent pill and the inactive is transparent text.
+ *   - Amount — promoted to a big peach (cardElevated) hero card with
+ *     white text; the `.00` fraction trails in a muted shade as a
+ *     decoration.
+ *   - Category grid — each tile is its own rounded card (no shared
+ *     wrapper). Selected tile flips to a vivid pink background with
+ *     white text to read as the "active filter."
+ *   - Submit — full-width pill with bone emoji + brand voice line.
+ *
+ * Data flow is unchanged: writes go via `useCreateTransaction` →
+ * local SQLite (`_sync_state='pending_create'`) → sync engine pushes.
  */
+
+const MAX_VISIBLE_CATS = 7; // 4-col grid; the 8th slot is the "ดูเพิ่ม" tile
+
+// Active category tile color (independent of theme accent — semantic
+// "you picked this" feedback rather than a chrome surface).
+const SELECTED_CAT_COLOR = '#FF7BAC';
+
+function CloseIcon({ color, size }: { color: string; size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 6l12 12M18 6L6 18"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+      />
+    </Svg>
+  );
+}
+
 export default function QuickAddScreen() {
   const { ledger } = useActiveLedger();
   const cats = useCategories(ledger?.id);
   const create = useCreateTransaction();
+  const c = useTheme().colors;
 
   const [kind, setKind] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
+  const [payment, setPayment] = useState<'cash' | 'transfer'>('cash');
   const [error, setError] = useState<string | null>(null);
+  const [showAllCats, setShowAllCats] = useState(false);
 
-  const visibleCats = sortCategoriesByHierarchy(
-    (cats.data ?? []).filter((c) => c.kind === kind),
+  const filteredCats = useMemo(
+    () =>
+      sortCategoriesByHierarchy(
+        (cats.data ?? []).filter((cat) => cat.kind === kind),
+      ),
+    [cats.data, kind],
   );
+
+  const visibleCats = useMemo(
+    () => (showAllCats ? filteredCats : filteredCats.slice(0, MAX_VISIBLE_CATS)),
+    [filteredCats, showAllCats],
+  );
+  const overflowCount = Math.max(0, filteredCats.length - MAX_VISIBLE_CATS);
 
   function reset() {
     setAmount('');
     setNote('');
     setCategoryId(null);
+    setPayment('cash');
     setError(null);
+  }
+
+  function close() {
+    if (router.canGoBack()) router.back();
+    else router.replace('/(app)/dashboard');
   }
 
   async function save() {
     setError(null);
     const value = Number(amount.replace(/,/g, ''));
     if (!ledger) {
-      setError('No active ledger');
+      setError('ยังไม่มีสมุดบัญชี');
       return;
     }
     if (!Number.isFinite(value) || value <= 0) {
-      setError('Enter an amount');
+      setError('ใส่จำนวนเงินก่อน');
       return;
     }
     try {
@@ -58,113 +117,439 @@ export default function QuickAddScreen() {
         amount: value,
         note: note.trim() || null,
         category_id: categoryId,
+        payment_method: payment,
         occurred_at: new Date().toISOString(),
       });
       reset();
       router.replace('/(app)/transactions');
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Save failed');
+      console.error('createTransaction failed:', e);
+      const msg = e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ';
+      setError(msg);
     }
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white">
-      <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
-        <Text className="text-2xl font-semibold">Quick add</Text>
-
-        <View className="flex-row gap-2">
+    <SafeAreaView
+      className="flex-1"
+      style={{ backgroundColor: c.bg }}
+      edges={['top']}
+    >
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 96, gap: 16 }}>
+        {/* Header */}
+        <View className="flex-row items-center justify-between">
           <Pressable
-            onPress={() => setKind('expense')}
-            className={`flex-1 py-2 rounded-lg border ${
-              kind === 'expense'
-                ? 'border-red-500 bg-red-50'
-                : 'border-zinc-200'
-            }`}
+            onPress={close}
+            style={{
+              width: 36,
+              height: 36,
+              borderRadius: 18,
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: c.card,
+            }}
           >
-            <Text className="text-center font-medium">Expense</Text>
+            <CloseIcon color={c.text} size={18} />
           </Pressable>
-          <Pressable
-            onPress={() => setKind('income')}
-            className={`flex-1 py-2 rounded-lg border ${
-              kind === 'income'
-                ? 'border-green-500 bg-green-50'
-                : 'border-zinc-200'
-            }`}
-          >
-            <Text className="text-center font-medium">Income</Text>
-          </Pressable>
-        </View>
-
-        <View>
-          <Text className="text-xs uppercase tracking-wider text-zinc-400 mb-1">
-            Amount ({ledger?.currency ?? 'THB'})
+          <Text style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>
+            เพิ่มรายการ
           </Text>
-          <TextInput
-            value={amount}
-            onChangeText={setAmount}
-            keyboardType="decimal-pad"
-            placeholder="0.00"
-            className="text-3xl font-semibold tabular-nums px-3 py-3 rounded-xl border border-zinc-200 bg-zinc-50"
-          />
+          <Pressable onPress={reset} className="px-3 py-2">
+            <Text style={{ color: c.accent, fontSize: 13, fontWeight: '700' }}>
+              เคลียร์
+            </Text>
+          </Pressable>
         </View>
 
+        {/* Shiba greeting — avatar + speech bubble */}
+        <View className="flex-row items-center gap-3">
+          <View
+            style={{
+              width: 48,
+              height: 48,
+              borderRadius: 24,
+              backgroundColor: c.cardElevated,
+              alignItems: 'center',
+              justifyContent: 'center',
+              overflow: 'hidden',
+            }}
+          >
+            {/* The mascot's viewBox includes a ground shadow — shift it
+                down slightly so the face sits centered in the circle. */}
+            <View style={{ marginTop: 4 }}>
+              <ShibaMascot size={48} />
+            </View>
+          </View>
+          <View
+            className="rounded-full px-4 py-2.5 flex-1"
+            style={{ backgroundColor: c.card }}
+          >
+            <Text style={{ color: c.text, fontSize: 13 }}>
+              วันนี้บันทึก{' '}
+              <Text style={{ fontWeight: '700' }}>อะไรน้า?</Text> 🦴
+            </Text>
+          </View>
+        </View>
+
+        {/* Kind toggle — segmented control */}
+        <View
+          className="rounded-full p-1.5 flex-row"
+          style={{ backgroundColor: c.card }}
+        >
+          {(['expense', 'income'] as const).map((k) => {
+            const active = kind === k;
+            return (
+              <Pressable
+                key={k}
+                onPress={() => {
+                  setKind(k);
+                  setCategoryId(null);
+                }}
+                className="flex-1 py-2.5 rounded-full items-center"
+                style={{
+                  backgroundColor: active ? c.accent : 'transparent',
+                }}
+              >
+                <Text
+                  style={{
+                    color: active ? '#FFFFFF' : c.textSecondary,
+                    fontSize: 14,
+                    fontWeight: '700',
+                  }}
+                >
+                  {k === 'expense' ? 'รายจ่าย' : 'รายรับ'}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+
+        {/* Amount — hero card uses accent color for visual punch
+            (white text reads cleanly on the orange surface). */}
+        <View
+          className="rounded-3xl px-5 py-6"
+          style={{ backgroundColor: c.accent }}
+        >
+          <Text
+            className="text-center"
+            style={{
+              color: 'rgba(255, 255, 255, 0.75)',
+              fontSize: 13,
+            }}
+          >
+            จำนวนเงิน
+          </Text>
+          <View className="flex-row items-baseline justify-center gap-1 mt-2">
+            <Text
+              style={{
+                color: '#FFFFFF',
+                fontSize: 44,
+                fontWeight: '700',
+              }}
+            >
+              ฿
+            </Text>
+            <TextInput
+              value={amount}
+              onChangeText={setAmount}
+              keyboardType="decimal-pad"
+              placeholder="0"
+              placeholderTextColor="rgba(255, 255, 255, 0.5)"
+              style={{
+                color: '#FFFFFF',
+                fontSize: 44,
+                fontWeight: '700',
+                paddingVertical: 0,
+                minWidth: 80,
+                textAlign: 'left',
+              }}
+            />
+          </View>
+        </View>
+
+        {/* Payment method */}
         <View>
-          <Text className="text-xs uppercase tracking-wider text-zinc-400 mb-2">
-            Category
+          <Text
+            style={{
+              color: c.text,
+              fontSize: 13,
+              fontWeight: '600',
+              marginBottom: 8,
+              marginLeft: 2,
+            }}
+          >
+            จ่ายด้วย
+          </Text>
+          <View className="flex-row gap-3">
+            <PaymentCard
+              colors={c}
+              icon="💵"
+              title="เงินสด"
+              subtitle="ในกระเป๋า"
+              selected={payment === 'cash'}
+              onPress={() => setPayment('cash')}
+            />
+            <PaymentCard
+              colors={c}
+              icon="🏦"
+              title="โอน"
+              subtitle="PromptPay"
+              selected={payment === 'transfer'}
+              onPress={() => setPayment('transfer')}
+            />
+          </View>
+        </View>
+
+        {/* Category grid — 4 columns, each tile its own card */}
+        <View>
+          <Text
+            style={{
+              color: c.text,
+              fontSize: 13,
+              fontWeight: '600',
+              marginBottom: 10,
+              marginLeft: 2,
+            }}
+          >
+            เลือกหมวด
           </Text>
           {cats.isLoading ? (
-            <ActivityIndicator />
+            <ActivityIndicator color={c.accent} />
+          ) : visibleCats.length === 0 ? (
+            <Pressable
+              onPress={() => router.push('/(app)/categories')}
+              className="py-3 items-center"
+            >
+              <Text style={{ color: c.textSecondary, fontSize: 12 }}>
+                ยังไม่มีหมวด — กดเพื่อสร้างหมวดแรก
+              </Text>
+            </Pressable>
           ) : (
-            <View className="flex-row flex-wrap gap-2">
-              {visibleCats.map((c) => (
-                <Pressable
-                  key={c.id}
-                  onPress={() => setCategoryId(c.id === categoryId ? null : c.id)}
-                  className={`flex-row items-center gap-1.5 px-3 py-1.5 rounded-full border ${
-                    categoryId === c.id
-                      ? 'border-cyan-500 bg-cyan-50'
-                      : 'border-zinc-200'
-                  }`}
-                >
-                  <EmojiOrIcon value={c.icon} fallback="sparkle" size={16} />
-                  <Text className="text-sm">
-                    {c.parent_id ? '↳ ' : ''}
-                    {c.name}
-                  </Text>
-                </Pressable>
-              ))}
+            <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
+              {visibleCats.map((cat) => {
+                const selected = categoryId === cat.id;
+                const isSub = !!cat.parent_id;
+                return (
+                  <View key={cat.id} style={{ width: '25%', padding: 4 }}>
+                    <Pressable
+                      onPress={() =>
+                        setCategoryId(selected ? null : cat.id)
+                      }
+                      style={{
+                        paddingVertical: 16,
+                        borderRadius: 18,
+                        backgroundColor: selected
+                          ? SELECTED_CAT_COLOR
+                          : c.card,
+                        alignItems: 'center',
+                        gap: 6,
+                      }}
+                    >
+                      <Text style={{ fontSize: 26 }}>
+                        {cat.icon &&
+                        // If the icon value is a sprite name (text), JtIcon
+                        // would render — but most user icons are emoji
+                        // strings already. Render as text for the big
+                        // emoji style.
+                        cat.icon.length <= 4
+                          ? cat.icon
+                          : null}
+                        {(!cat.icon || cat.icon.length > 4) && (
+                          <EmojiOrIcon
+                            value={cat.icon}
+                            fallback="sparkle"
+                            size={24}
+                          />
+                        )}
+                      </Text>
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          color: selected ? '#FFFFFF' : c.text,
+                          fontSize: 12,
+                          fontWeight: selected ? '700' : '500',
+                        }}
+                      >
+                        {isSub ? '↳ ' : ''}
+                        {cat.name}
+                      </Text>
+                    </Pressable>
+                  </View>
+                );
+              })}
+              {!showAllCats && overflowCount > 0 && (
+                <View style={{ width: '25%', padding: 4 }}>
+                  <Pressable
+                    onPress={() => setShowAllCats(true)}
+                    style={{
+                      paddingVertical: 16,
+                      borderRadius: 18,
+                      backgroundColor: c.card,
+                      alignItems: 'center',
+                      gap: 6,
+                      borderWidth: 1,
+                      borderColor: c.border,
+                      borderStyle: 'dashed',
+                    }}
+                  >
+                    <Text style={{ fontSize: 26, color: c.textSecondary }}>
+                      ＋
+                    </Text>
+                    <Text
+                      style={{
+                        color: c.textSecondary,
+                        fontSize: 12,
+                        fontWeight: '500',
+                      }}
+                    >
+                      ดูเพิ่ม +{overflowCount}
+                    </Text>
+                  </Pressable>
+                </View>
+              )}
             </View>
           )}
         </View>
 
-        <View>
-          <Text className="text-xs uppercase tracking-wider text-zinc-400 mb-1">
-            Note (optional)
-          </Text>
-          <TextInput
-            value={note}
-            onChangeText={setNote}
-            placeholder="e.g. กาแฟตอนเช้า"
-            className="px-3 py-2.5 rounded-xl border border-zinc-200 bg-zinc-50"
-          />
+        {/* Optional note */}
+        <View
+          className="rounded-2xl px-4 py-3"
+          style={{ backgroundColor: c.card }}
+        >
+          <View className="flex-row items-center gap-2">
+            <Text style={{ fontSize: 16 }}>📝</Text>
+            <TextInput
+              value={note}
+              onChangeText={setNote}
+              placeholder="เพิ่มโน้ต (ไม่บังคับ)"
+              placeholderTextColor={c.textMuted}
+              style={{
+                color: c.text,
+                fontSize: 14,
+                flex: 1,
+                paddingVertical: 4,
+              }}
+            />
+          </View>
         </View>
 
         {error && (
-          <Text className="text-sm text-red-600">{error}</Text>
+          <Text
+            className="text-center"
+            style={{ color: c.expense, fontSize: 13 }}
+          >
+            {error}
+          </Text>
         )}
 
+        {/* Submit — full pill */}
         <Pressable
           onPress={save}
           disabled={create.isPending}
-          className="px-4 py-3 rounded-xl bg-zinc-900 active:opacity-80"
+          style={{
+            backgroundColor: c.accent,
+            paddingVertical: 16,
+            borderRadius: 999,
+            alignItems: 'center',
+            flexDirection: 'row',
+            justifyContent: 'center',
+            gap: 8,
+            shadowColor: c.accent,
+            shadowOpacity: 0.3,
+            shadowRadius: 12,
+            shadowOffset: { width: 0, height: 6 },
+            elevation: 4,
+            opacity: create.isPending ? 0.6 : 1,
+          }}
         >
           {create.isPending ? (
-            <ActivityIndicator color="#fff" />
+            <ActivityIndicator color="#FFFFFF" />
           ) : (
-            <Text className="text-white text-center font-semibold">Save</Text>
+            <>
+              <Text style={{ fontSize: 18 }}>🦴</Text>
+              <Text
+                style={{
+                  color: '#FFFFFF',
+                  fontSize: 15,
+                  fontWeight: '700',
+                }}
+              >
+                บันทึกแล้ว น้องชิบะ ดีใจ
+              </Text>
+            </>
           )}
         </Pressable>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function PaymentCard({
+  colors,
+  icon,
+  title,
+  subtitle,
+  selected,
+  onPress,
+}: {
+  colors: ReturnType<typeof useTheme>['colors'];
+  icon: string;
+  title: string;
+  subtitle: string;
+  selected: boolean;
+  onPress: () => void;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        flex: 1,
+        padding: 12,
+        borderRadius: 18,
+        backgroundColor: colors.card,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+        borderWidth: 1.5,
+        borderColor: selected ? colors.accent : 'transparent',
+      }}
+    >
+      <View
+        style={{
+          width: 36,
+          height: 36,
+          borderRadius: 12,
+          backgroundColor: colors.bg,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <Text style={{ fontSize: 18 }}>{icon}</Text>
+      </View>
+      <View className="flex-1">
+        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
+          {title}
+        </Text>
+        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>
+          {subtitle}
+        </Text>
+      </View>
+      {selected && (
+        <View
+          style={{
+            width: 22,
+            height: 22,
+            borderRadius: 11,
+            backgroundColor: colors.accent,
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+            ✓
+          </Text>
+        </View>
+      )}
+    </Pressable>
   );
 }

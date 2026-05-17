@@ -17,7 +17,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * still hit Supabase directly until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -103,6 +103,33 @@ const STATEMENTS = [
     _sync_state TEXT NOT NULL DEFAULT 'clean'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_ledger_active ON ledgers(is_personal DESC, created_at) WHERE deleted_at IS NULL`,
+
+  // ---- v3: recurring_transactions mirror (pull-only) ----
+  // The server table doesn't have `deleted_at` (uses hard DELETE), so
+  // pullRecurring does replace-all semantics instead of incremental
+  // cursor: it deletes local rows for the synced ledgers and inserts
+  // whatever the server returned. Cheap enough — typical user has < 30
+  // rules total.
+  //
+  // `amount` is nullable to support variable-cost mode (bills like
+  // utilities where the amount isn't known until the bill arrives).
+  `CREATE TABLE IF NOT EXISTS recurring_transactions (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    user_id TEXT NOT NULL,
+    category_id TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('income','expense')),
+    amount REAL,
+    note TEXT,
+    period TEXT NOT NULL CHECK (period IN ('daily','weekly','monthly','yearly')),
+    next_run_at TEXT NOT NULL,
+    last_run_at TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT,
+    updated_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_recurring_ledger ON recurring_transactions(ledger_id, active DESC, next_run_at)`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

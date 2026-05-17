@@ -11,6 +11,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useTheme } from '../../providers/ThemeProvider';
 import { useCreateLedger } from '../../lib/queries/ledgers';
 
 /**
@@ -40,9 +41,13 @@ const CURRENCY_PRESETS = ['THB', 'USD', 'JPY', 'EUR'];
 export default function OnboardingLedgerScreen() {
   const create = useCreateLedger();
   const { setActiveLedger } = useActiveLedger();
+  const c = useTheme().colors;
 
   const [name, setName] = useState('สมุดของฉัน');
   const [icon, setIcon] = useState<string>('🦊');
+  // Ledger color preset — picked by user, NOT a theme token. Stays
+  // brand-fixed across light / dark so the user's chosen color is the
+  // same on every device.
   const [color, setColor] = useState<string>(COLOR_PRESETS[0].value);
   const [currency, setCurrency] = useState<string>('THB');
   const [error, setError] = useState<string | null>(null);
@@ -89,7 +94,7 @@ export default function OnboardingLedgerScreen() {
   return (
     <SafeAreaView
       className="flex-1"
-      style={{ backgroundColor: '#FFF4E6' }}
+      style={{ backgroundColor: c.bg }}
       edges={['top', 'bottom']}
     >
       <ScrollView contentContainerStyle={{ padding: 20, gap: 16 }}>
@@ -98,13 +103,13 @@ export default function OnboardingLedgerScreen() {
         </View>
         <Text
           className="text-center"
-          style={{ color: '#3D2A1E', fontSize: 22, fontWeight: '700' }}
+          style={{ color: c.text, fontSize: 22, fontWeight: '700' }}
         >
           สร้างสมุดบัญชีแรก
         </Text>
         <Text
           className="text-center"
-          style={{ color: '#8B7563', fontSize: 13 }}
+          style={{ color: c.textSecondary, fontSize: 13 }}
         >
           สมุดคือกล่องเก็บรายการรายรับ-รายจ่ายของคุณ {'\n'}สร้างได้หลายเล่ม เช่น
           ส่วนตัว, ครอบครัว, ทริป ฯลฯ
@@ -113,10 +118,10 @@ export default function OnboardingLedgerScreen() {
         {/* Name */}
         <View
           className="rounded-2xl p-4"
-          style={{ backgroundColor: '#FFFFFF' }}
+          style={{ backgroundColor: c.card }}
         >
           <Text
-            style={{ color: '#8B7563', fontSize: 11, marginBottom: 6 }}
+            style={{ color: c.textSecondary, fontSize: 11, marginBottom: 6 }}
           >
             ชื่อสมุด
           </Text>
@@ -124,11 +129,12 @@ export default function OnboardingLedgerScreen() {
             value={name}
             onChangeText={setName}
             placeholder="เช่น สมุดของฉัน, ทริปเชียงใหม่"
+            placeholderTextColor={c.textMuted}
             className="px-3 py-2.5 rounded-xl"
             style={{
-              backgroundColor: '#FFF4E6',
+              backgroundColor: c.bg,
               fontSize: 16,
-              color: '#3D2A1E',
+              color: c.text,
             }}
           />
         </View>
@@ -136,10 +142,10 @@ export default function OnboardingLedgerScreen() {
         {/* Icon picker */}
         <View
           className="rounded-2xl p-4"
-          style={{ backgroundColor: '#FFFFFF' }}
+          style={{ backgroundColor: c.card }}
         >
           <Text
-            style={{ color: '#8B7563', fontSize: 11, marginBottom: 8 }}
+            style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
             ไอคอน
           </Text>
@@ -156,9 +162,9 @@ export default function OnboardingLedgerScreen() {
                     borderRadius: 22,
                     alignItems: 'center',
                     justifyContent: 'center',
-                    backgroundColor: selected ? color : '#FFF4E6',
+                    backgroundColor: selected ? color : c.bg,
                     borderWidth: selected ? 2 : 0,
-                    borderColor: '#3D2A1E',
+                    borderColor: c.text,
                   }}
                 >
                   <Text style={{ fontSize: 22 }}>{e}</Text>
@@ -171,27 +177,27 @@ export default function OnboardingLedgerScreen() {
         {/* Color picker */}
         <View
           className="rounded-2xl p-4"
-          style={{ backgroundColor: '#FFFFFF' }}
+          style={{ backgroundColor: c.card }}
         >
           <Text
-            style={{ color: '#8B7563', fontSize: 11, marginBottom: 8 }}
+            style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
             สี
           </Text>
           <View className="flex-row flex-wrap gap-3">
-            {COLOR_PRESETS.map((c) => {
-              const selected = color === c.value;
+            {COLOR_PRESETS.map((preset) => {
+              const selected = color === preset.value;
               return (
                 <Pressable
-                  key={c.value}
-                  onPress={() => setColor(c.value)}
+                  key={preset.value}
+                  onPress={() => setColor(preset.value)}
                   style={{
                     width: 36,
                     height: 36,
                     borderRadius: 18,
-                    backgroundColor: c.value,
+                    backgroundColor: preset.value,
                     borderWidth: selected ? 3 : 0,
-                    borderColor: '#3D2A1E',
+                    borderColor: c.text,
                   }}
                 />
               );
@@ -202,33 +208,33 @@ export default function OnboardingLedgerScreen() {
         {/* Currency picker */}
         <View
           className="rounded-2xl p-4"
-          style={{ backgroundColor: '#FFFFFF' }}
+          style={{ backgroundColor: c.card }}
         >
           <Text
-            style={{ color: '#8B7563', fontSize: 11, marginBottom: 8 }}
+            style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
             สกุลเงิน
           </Text>
           <View className="flex-row gap-2">
-            {CURRENCY_PRESETS.map((c) => {
-              const selected = currency === c;
+            {CURRENCY_PRESETS.map((cur) => {
+              const selected = currency === cur;
               return (
                 <Pressable
-                  key={c}
-                  onPress={() => setCurrency(c)}
+                  key={cur}
+                  onPress={() => setCurrency(cur)}
                   className="flex-1 py-2.5 rounded-xl items-center"
                   style={{
-                    backgroundColor: selected ? color : '#FFF4E6',
+                    backgroundColor: selected ? color : c.bg,
                   }}
                 >
                   <Text
                     style={{
-                      color: selected ? '#FFFFFF' : '#3D2A1E',
+                      color: selected ? '#FFFFFF' : c.text,
                       fontSize: 13,
                       fontWeight: '600',
                     }}
                   >
-                    {c}
+                    {cur}
                   </Text>
                 </Pressable>
               );
@@ -239,7 +245,7 @@ export default function OnboardingLedgerScreen() {
         {error && (
           <Text
             className="text-center"
-            style={{ color: '#D98556', fontSize: 13 }}
+            style={{ color: c.expense, fontSize: 13 }}
           >
             {error}
           </Text>

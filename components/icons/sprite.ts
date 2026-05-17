@@ -27,29 +27,43 @@ async function loadSprite(style: IconStyle): Promise<Map<string, string>> {
   if (pending) return pending;
 
   const job = (async () => {
-    const asset = Asset.fromModule(SPRITE_MODULES[style]);
-    await asset.downloadAsync();
-    const uri = asset.localUri ?? asset.uri;
-    const res = await fetch(uri);
-    const text = await res.text();
-    const map = new Map<string, string>();
-    let m: RegExpExecArray | null;
-    while ((m = SYMBOL_RE.exec(text)) !== null) {
-      const [, name, attrs, inner] = m;
-      // Wrap each symbol's inner content in a standalone <svg> so
-      // react-native-svg's SvgXml can render it on its own. Pull the
-      // viewBox off the symbol if it set one; default 48×48 matches
-      // every Jaitang sprite.
-      const viewBoxMatch = attrs.match(/viewBox="([^"]+)"/);
-      const viewBox = viewBoxMatch?.[1] ?? '0 0 48 48';
-      map.set(
-        name,
-        `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${inner}</svg>`,
-      );
+    try {
+      const asset = Asset.fromModule(SPRITE_MODULES[style]);
+      await asset.downloadAsync();
+      const uri = asset.localUri ?? asset.uri;
+      const res = await fetch(uri);
+      const text = await res.text();
+      const map = new Map<string, string>();
+      let m: RegExpExecArray | null;
+      while ((m = SYMBOL_RE.exec(text)) !== null) {
+        const [, name, attrs, inner] = m;
+        // Wrap each symbol's inner content in a standalone <svg> so
+        // react-native-svg's SvgXml can render it on its own. Pull the
+        // viewBox off the symbol if it set one; default 48×48 matches
+        // every Jaitang sprite.
+        const viewBoxMatch = attrs.match(/viewBox="([^"]+)"/);
+        const viewBox = viewBoxMatch?.[1] ?? '0 0 48 48';
+        map.set(
+          name,
+          `<svg xmlns="http://www.w3.org/2000/svg" viewBox="${viewBox}">${inner}</svg>`,
+        );
+      }
+      cache.set(style, map);
+      return map;
+    } catch (e) {
+      // Don't cache an empty result — let the next render retry. Return
+      // an empty map (rather than re-throwing) so JtIcon can render an
+      // empty placeholder box without surfacing an unhandled rejection
+      // up through React Native's xhr.onerror path.
+      console.warn(`[sprite] loadSprite("${style}") failed:`, e);
+      return new Map<string, string>();
+    } finally {
+      // Always clear the in-flight slot, success OR failure — otherwise
+      // a single fetch flake would permanently jam the slot with a
+      // rejected promise and every subsequent JtIcon for that style
+      // would re-throw the same network error.
+      inflight.delete(style);
     }
-    cache.set(style, map);
-    inflight.delete(style);
-    return map;
   })();
 
   inflight.set(style, job);

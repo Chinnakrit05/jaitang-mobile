@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useTheme, type Mode } from '../../providers/ThemeProvider';
 import { signOut } from '../../lib/auth';
 import {
   useIconStyle,
@@ -18,12 +19,19 @@ import {
 import { LOCALES, LOCALE_LABELS, setLocale, type Locale } from '../../lib/i18n';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
+const MODE_LABELS: Record<Mode, string> = {
+  light: 'สว่าง',
+  dark: 'มืด',
+  system: 'ตามระบบ',
+};
+
 export default function SettingsScreen() {
   const { session } = useAuth();
   const { t, i18n } = useTranslation();
   const iconStyle = useIconStyle();
   const setIconStyle = useSetIconStyle();
   const { ledger } = useActiveLedger();
+  const { mode, setMode, oled, setOled, isDark } = useTheme();
 
   return (
     <SafeAreaView className="flex-1 bg-white">
@@ -66,6 +74,34 @@ export default function SettingsScreen() {
             <Text className="text-sm">สร้างสมุดเล่มใหม่</Text>
           </Pressable>
         </Section>
+
+        <Section title="โหมด">
+          {(['light', 'dark', 'system'] as const).map((m) => (
+            <Choice
+              key={m}
+              label={MODE_LABELS[m]}
+              selected={mode === m}
+              onPress={() => setMode(m)}
+            />
+          ))}
+        </Section>
+
+        {/* OLED only shows up when the effective theme is dark, since
+            it's purely a sub-option of dark mode. */}
+        {isDark && (
+          <Section title="True Black (OLED)">
+            <Choice
+              label="ปิด"
+              selected={!oled}
+              onPress={() => setOled(false)}
+            />
+            <Choice
+              label="เปิด — พื้นหลังดำสนิท ประหยัดแบต OLED"
+              selected={oled}
+              onPress={() => setOled(true)}
+            />
+          </Section>
+        )}
 
         <Section title="Icon style">
           {ICON_STYLES.map((style) => (

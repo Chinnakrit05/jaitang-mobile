@@ -1,8 +1,19 @@
-import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useAuth } from './AuthProvider';
 import { useLedgers, type LedgerSummary } from '../lib/queries/ledgers';
+import {
+  useCategories,
+  useSeedDefaultCategories,
+} from '../lib/queries/categories';
 
 const STORAGE_KEY = 'jt-active-ledger';
 
@@ -56,6 +67,45 @@ export function ActiveLedgerProvider({ children }: { children: ReactNode }) {
   }
 
   const loading = authLoading || ledgers.isLoading || !hydrated;
+
+  // ---- Auto-seed default categories ----
+  // A subcategory can't exist without a parent, so a brand-new ledger
+  // with zero categories is a footgun (the parent picker would be
+  // empty). New ledgers created via the `create_ledger` RPC already get
+  // seeded server-side; this effect handles ledgers that pre-date the
+  // auto-seed wiring or were created some other way.
+  //
+  // The seed RPC is idempotent (skips if any non-deleted category
+  // already exists). We still track attempts per-session in a ref so we
+  // don't spam the network if the seed fails for some reason — on
+  // failure we remove the id so the next mount can retry.
+  const cats = useCategories(active?.id);
+  const seed = useSeedDefaultCategories();
+  const seedAttempted = useRef<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!active) return;
+    if (cats.isLoading || cats.isFetching) return;
+    if ((cats.data?.length ?? 0) > 0) return;
+    if (seedAttempted.current.has(active.id)) return;
+    seedAttempted.current.add(active.id);
+    console.log('[ActiveLedger] auto-seeding categories for', active.id);
+    seed
+      .mutateAsync(active.id)
+      .then((count) => {
+        console.log('[ActiveLedger] seed result — count from server:', count);
+      })
+      .catch((e) => {
+        console.warn('[ActiveLedger] auto-seed failed for', active.id, e);
+        // Allow a retry on next mount — but only if data is still empty
+        // (otherwise we'd loop on transient errors).
+        seedAttempted.current.delete(active.id);
+      });
+    // `seed` is a stable mutation object from react-query; intentionally
+    // omitted from deps so we don't re-fire when its internal state
+    // updates.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [active?.id, cats.isLoading, cats.isFetching, cats.data?.length]);
 
   return (
     <Ctx.Provider value={{ ledger: active, loading, setActiveLedger }}>

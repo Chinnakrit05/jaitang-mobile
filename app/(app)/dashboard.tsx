@@ -5,6 +5,7 @@ import { router } from 'expo-router';
 
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useTheme } from '../../providers/ThemeProvider';
 import { useLocalMonthTransactions } from '../../lib/queries/transactions-local';
 import { useCategories } from '../../lib/queries/categories';
 import { formatCurrency } from '../../lib/format';
@@ -24,10 +25,14 @@ import { SyncStatusBadge } from '../../components/SyncStatusBadge';
  *   3. Trip card — placeholder until the trips table lands.
  *   4. Category breakdown donut + legend, computed from real txs.
  *   5. Recent transactions (last 5).
+ *
+ * Colors come exclusively from `useTheme().colors` so light / dark /
+ * (future) accent + season palettes flow through automatically. The
+ * one exception is the donut category palette (pink/purple/yellow/…)
+ * which is intentionally fixed — it's semantic per category, not theme.
  */
 
-// Six fixed colors cycled through categories — matches the palette used
-// by the mockup's donut.
+// Fixed across themes — these are category brand colors, not palette.
 const CATEGORY_PALETTE = [
   '#FF7BAC', // pink
   '#A78BFA', // purple
@@ -53,7 +58,6 @@ const THAI_MONTHS = [
 ];
 
 function formatThaiMonth(d: Date) {
-  // Buddhist Era — Gregorian year + 543.
   return `${THAI_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
 }
 
@@ -71,6 +75,7 @@ export default function DashboardScreen() {
   const { ledger, loading: ledgerLoading } = useActiveLedger();
   const txs = useLocalMonthTransactions(ledger?.id);
   const cats = useCategories(ledger?.id);
+  const c = useTheme().colors;
 
   const monthIncome = (txs.data ?? [])
     .filter((t) => t.kind === 'income')
@@ -80,7 +85,6 @@ export default function DashboardScreen() {
     .reduce((s, t) => s + t.amount, 0);
   const monthNet = monthIncome - monthExpense;
 
-  // Group expenses by category to feed the donut.
   const breakdown = useMemo(() => {
     const byCat = new Map<string | null, number>();
     for (const t of txs.data ?? []) {
@@ -112,7 +116,6 @@ export default function DashboardScreen() {
       .slice(0, 5);
   }, [txs.data]);
 
-  // Mood / budget chip — until budgets exist, peg it at "% of mock 42k".
   const budgetCap = 42000;
   const moodPct = Math.min(100, Math.round((monthExpense / budgetCap) * 100));
   const moodLabel =
@@ -126,7 +129,7 @@ export default function DashboardScreen() {
   return (
     <SafeAreaView
       className="flex-1"
-      style={{ backgroundColor: '#FFF4E6' }}
+      style={{ backgroundColor: c.bg }}
       edges={['top']}
     >
       <ScrollView
@@ -137,23 +140,27 @@ export default function DashboardScreen() {
           <View className="flex-row items-center gap-3">
             <View
               className="w-11 h-11 rounded-full items-center justify-center"
-              style={{ backgroundColor: '#FFE4C7' }}
+              style={{ backgroundColor: c.chip }}
             >
               <Text style={{ fontSize: 22 }}>🦊</Text>
             </View>
             <View>
-              <Text style={{ color: '#8B7563', fontSize: 12 }}>สวัสดี ✨</Text>
-              <Text style={{ color: '#3D2A1E', fontSize: 16, fontWeight: '600' }}>
+              <Text style={{ color: c.textSecondary, fontSize: 12 }}>
+                สวัสดี ✨
+              </Text>
+              <Text
+                style={{ color: c.text, fontSize: 16, fontWeight: '600' }}
+              >
                 {userName}
               </Text>
             </View>
           </View>
           <View
             className="flex-row items-center gap-1 px-3 py-1.5 rounded-full"
-            style={{ backgroundColor: 'rgba(255, 123, 172, 0.13)' }}
+            style={{ backgroundColor: c.expenseBg }}
           >
             <Text style={{ fontSize: 13 }}>🔥</Text>
-            <Text style={{ color: '#D98556', fontSize: 12, fontWeight: '700' }}>
+            <Text style={{ color: c.accent, fontSize: 12, fontWeight: '700' }}>
               12 วัน
             </Text>
           </View>
@@ -162,16 +169,16 @@ export default function DashboardScreen() {
         <SyncStatusBadge />
 
         {ledgerLoading ? (
-          <ActivityIndicator />
+          <ActivityIndicator color={c.accent} />
         ) : !ledger ? (
           <View
             className="rounded-3xl p-6 items-center"
-            style={{ backgroundColor: '#FFEDD5' }}
+            style={{ backgroundColor: c.cardElevated }}
           >
             <Text style={{ fontSize: 44 }}>📒</Text>
             <Text
               style={{
-                color: '#3D2A1E',
+                color: c.text,
                 fontSize: 18,
                 fontWeight: '700',
                 marginTop: 8,
@@ -181,7 +188,7 @@ export default function DashboardScreen() {
             </Text>
             <Text
               className="text-center"
-              style={{ color: '#8B7563', fontSize: 13, marginTop: 4 }}
+              style={{ color: c.textSecondary, fontSize: 13, marginTop: 4 }}
             >
               สร้างสมุดเล่มแรกเพื่อเริ่มจดรายรับ-รายจ่าย
             </Text>
@@ -192,8 +199,8 @@ export default function DashboardScreen() {
                 paddingHorizontal: 22,
                 paddingVertical: 12,
                 borderRadius: 14,
-                backgroundColor: '#D98556',
-                shadowColor: '#D98556',
+                backgroundColor: c.accent,
+                shadowColor: c.accent,
                 shadowOpacity: 0.35,
                 shadowRadius: 8,
                 shadowOffset: { width: 0, height: 3 },
@@ -202,7 +209,7 @@ export default function DashboardScreen() {
             >
               <Text
                 style={{
-                  color: '#FFFFFF',
+                  color: c.accentText,
                   fontSize: 14,
                   fontWeight: '700',
                 }}
@@ -213,145 +220,124 @@ export default function DashboardScreen() {
           </View>
         ) : (
           <>
-            {/* 2. Hero balance card */}
+            {/* 2. Hero balance card — text on the left, shiba in the
+                top-right corner. The card uses `position: relative` so
+                ShibaMascot can absolute-position itself; everything
+                below has rightward padding to leave room for the mascot
+                without overlapping. */}
             <View
               className="rounded-3xl p-5 overflow-hidden"
-              style={{ backgroundColor: '#FFEDD5' }}
+              style={{
+                backgroundColor: c.cardElevated,
+                position: 'relative',
+              }}
             >
-              <View className="items-center">
-                <ShibaMascot size={94} />
+              <View style={{ position: 'absolute', top: 8, right: 8 }}>
+                <ShibaMascot size={76} />
               </View>
+
               <Text
-                className="text-center mt-2"
-                style={{ color: '#8B7563', fontSize: 12 }}
+                style={{ color: c.textSecondary, fontSize: 12, paddingRight: 80 }}
               >
                 ยอดคงเหลือเดือนนี้
               </Text>
               <Text
-                className="text-center mt-1"
-                style={{ color: '#8B7563', fontSize: 11 }}
+                style={{
+                  color: c.textSecondary,
+                  fontSize: 11,
+                  marginTop: 2,
+                  paddingRight: 80,
+                }}
               >
                 ‹ {formatThaiMonth(new Date())} ›
               </Text>
               <Text
-                className="text-center mt-2"
-                style={{ color: '#3D2A1E', fontSize: 34, fontWeight: '700' }}
+                style={{
+                  color: c.text,
+                  fontSize: 40,
+                  fontWeight: '700',
+                  marginTop: 14,
+                }}
               >
-                {formatCurrency(monthNet, ledger.currency)}
+                ฿ {Math.round(monthNet).toLocaleString('en-US')}
               </Text>
 
-              <View className="flex-row justify-center gap-3 mt-3">
+              <View className="flex-row gap-2 mt-3">
                 <View
                   className="flex-row items-center gap-1 px-3 py-1.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(52, 211, 153, 0.18)' }}
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.65)' }}
                 >
-                  <Text style={{ color: '#0F8A4E', fontSize: 11 }}>▲</Text>
+                  <Text style={{ color: c.income, fontSize: 11 }}>▲</Text>
                   <Text
-                    style={{ color: '#0F8A4E', fontSize: 12, fontWeight: '600' }}
+                    style={{ color: c.text, fontSize: 12, fontWeight: '600' }}
                   >
-                    รายรับ {formatCurrency(monthIncome, ledger.currency)}
+                    รายรับ ฿{Math.round(monthIncome).toLocaleString('en-US')}
                   </Text>
                 </View>
                 <View
                   className="flex-row items-center gap-1 px-3 py-1.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(255, 123, 172, 0.18)' }}
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.65)' }}
                 >
-                  <Text style={{ color: '#D98556', fontSize: 11 }}>▼</Text>
+                  <Text style={{ color: c.expense, fontSize: 11 }}>▼</Text>
                   <Text
-                    style={{ color: '#D98556', fontSize: 12, fontWeight: '600' }}
+                    style={{ color: c.text, fontSize: 12, fontWeight: '600' }}
                   >
-                    รายจ่าย {formatCurrency(monthExpense, ledger.currency)}
+                    รายจ่าย ฿{Math.round(monthExpense).toLocaleString('en-US')}
                   </Text>
                 </View>
               </View>
 
-              {/* Mood + progress */}
+              {/* Mood + progress — same as before, sits at the bottom
+                  of the hero card as a soft white sub-pill. */}
               <View
                 className="mt-4 px-3 py-2.5 rounded-2xl"
                 style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}
               >
-                <Text style={{ color: '#3D2A1E', fontSize: 13 }}>
+                <Text style={{ color: c.text, fontSize: 13 }}>
                   น้องชิบะ
-                  <Text style={{ color: '#8B7563', fontSize: 12 }}>
+                  <Text style={{ color: c.textSecondary, fontSize: 12 }}>
                     {'  '}
                     {moodLabel} · {moodPct}% ของงบ
                   </Text>
                 </Text>
                 <View
                   className="h-1.5 rounded-full mt-2"
-                  style={{ backgroundColor: 'rgba(217, 133, 86, 0.2)' }}
+                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}
                 >
                   <View
                     className="h-1.5 rounded-full"
-                    style={{ backgroundColor: '#D98556', width: `${moodPct}%` }}
+                    style={{ backgroundColor: c.accent, width: `${moodPct}%` }}
                   />
                 </View>
               </View>
             </View>
 
-            {/* 3. Trip card — placeholder */}
-            <Pressable
-              className="rounded-2xl p-4"
-              style={{ backgroundColor: '#FFFFFF' }}
-              onPress={() => {
-                /* trip details — not wired up yet */
-              }}
-            >
-              <View className="flex-row items-center justify-between">
-                <View className="flex-row items-center gap-3">
-                  <View
-                    className="w-10 h-10 rounded-full items-center justify-center"
-                    style={{ backgroundColor: 'rgba(96, 165, 250, 0.18)' }}
-                  >
-                    <Text style={{ fontSize: 18 }}>✈️</Text>
-                  </View>
-                  <View>
-                    <Text
-                      style={{ color: '#3D2A1E', fontSize: 14, fontWeight: '600' }}
-                    >
-                      ทริปญี่ปุ่น 🇯🇵
-                    </Text>
-                    <Text style={{ color: '#8B7563', fontSize: 11 }}>
-                      13–20 พ.ค. 2569
-                    </Text>
-                  </View>
-                </View>
-                <View className="items-end">
-                  <Text style={{ color: '#3D2A1E', fontSize: 14, fontWeight: '700' }}>
-                    ¥28,400
-                  </Text>
-                  <Text style={{ color: '#8B7563', fontSize: 11 }}>/ ¥80,000</Text>
-                </View>
-              </View>
-              <View
-                className="h-1.5 rounded-full mt-3"
-                style={{ backgroundColor: 'rgba(96, 165, 250, 0.2)' }}
-              >
-                <View
-                  className="h-1.5 rounded-full"
-                  style={{ backgroundColor: '#60A5FA', width: '35.5%' }}
-                />
-              </View>
-            </Pressable>
+            {/* 3. Trip card — HIDDEN until the trips table + sync mirror
+                land. The mockup keeps a slot here; we'll re-enable when
+                an `useActiveTrip()` hook + trips mirror exist so the
+                values come from real data instead of being hardcoded. */}
 
             {/* 4. Category breakdown */}
             <View>
               <View className="flex-row items-center justify-between mb-3">
-                <Text style={{ color: '#3D2A1E', fontSize: 16, fontWeight: '600' }}>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>
                   สรุปหมวดหมู่
                 </Text>
                 <Pressable onPress={() => router.push('/(app)/insights')}>
-                  <Text style={{ color: '#D98556', fontSize: 13, fontWeight: '600' }}>
+                  <Text style={{ color: c.accent, fontSize: 13, fontWeight: '600' }}>
                     ดูรายงาน →
                   </Text>
                 </Pressable>
               </View>
               <View
                 className="rounded-2xl p-4 flex-row items-center gap-4"
-                style={{ backgroundColor: '#FFFFFF' }}
+                style={{ backgroundColor: c.card }}
               >
                 <Donut
                   data={breakdown.slices}
+                  trackColor={c.chip}
+                  labelColor={c.textMuted}
+                  centerColor={c.text}
                   label="จ่ายไป"
                   centerValue={
                     monthExpense
@@ -361,7 +347,7 @@ export default function DashboardScreen() {
                 />
                 <View className="flex-1 gap-2">
                   {breakdown.rows.length === 0 ? (
-                    <Text style={{ color: '#8B7563', fontSize: 12 }}>
+                    <Text style={{ color: c.textSecondary, fontSize: 12 }}>
                       ยังไม่มีรายจ่าย — เพิ่มรายการแรกได้เลย
                     </Text>
                   ) : (
@@ -380,7 +366,7 @@ export default function DashboardScreen() {
                         <EmojiOrIcon value={r.icon} fallback="sparkle" size={14} />
                         <Text
                           numberOfLines={1}
-                          style={{ color: '#3D2A1E', fontSize: 13, flex: 1 }}
+                          style={{ color: c.text, fontSize: 13, flex: 1 }}
                         >
                           {r.name}
                         </Text>
@@ -394,23 +380,23 @@ export default function DashboardScreen() {
             {/* 5. Recent transactions */}
             <View>
               <View className="flex-row items-center justify-between mb-3">
-                <Text style={{ color: '#3D2A1E', fontSize: 16, fontWeight: '600' }}>
+                <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>
                   รายการล่าสุด
                 </Text>
                 <Pressable onPress={() => router.push('/(app)/transactions')}>
-                  <Text style={{ color: '#D98556', fontSize: 13, fontWeight: '600' }}>
+                  <Text style={{ color: c.accent, fontSize: 13, fontWeight: '600' }}>
                     ดูทั้งหมด →
                   </Text>
                 </Pressable>
               </View>
               <View
                 className="rounded-2xl overflow-hidden"
-                style={{ backgroundColor: '#FFFFFF' }}
+                style={{ backgroundColor: c.card }}
               >
                 {recent.length === 0 ? (
                   <Text
                     className="p-4 text-center"
-                    style={{ color: '#8B7563', fontSize: 13 }}
+                    style={{ color: c.textSecondary, fontSize: 13 }}
                   >
                     ยังไม่มีรายการในเดือนนี้
                   </Text>
@@ -418,19 +404,19 @@ export default function DashboardScreen() {
                   recent.map((t, idx) => {
                     const cat = cats.data?.find((c) => c.id === t.category_id);
                     const sign = t.kind === 'income' ? '+' : '−';
-                    const signColor = t.kind === 'income' ? '#0F8A4E' : '#3D2A1E';
+                    const signColor = t.kind === 'income' ? c.income : c.text;
                     return (
                       <View
                         key={t.id}
                         className="flex-row items-center gap-3 px-4 py-3"
                         style={{
                           borderTopWidth: idx === 0 ? 0 : 1,
-                          borderTopColor: 'rgba(217, 133, 86, 0.1)',
+                          borderTopColor: c.border,
                         }}
                       >
                         <View
                           className="w-10 h-10 rounded-full items-center justify-center"
-                          style={{ backgroundColor: '#FFF4E6' }}
+                          style={{ backgroundColor: c.bg }}
                         >
                           <EmojiOrIcon
                             value={cat?.icon}
@@ -442,7 +428,7 @@ export default function DashboardScreen() {
                           <Text
                             numberOfLines={1}
                             style={{
-                              color: '#3D2A1E',
+                              color: c.text,
                               fontSize: 14,
                               fontWeight: '500',
                             }}
@@ -450,7 +436,7 @@ export default function DashboardScreen() {
                             {t.note ?? cat?.name ?? 'รายการ'}
                           </Text>
                           <Text
-                            style={{ color: '#9A958C', fontSize: 11 }}
+                            style={{ color: c.textMuted, fontSize: 11 }}
                             numberOfLines={1}
                           >
                             {cat?.name ?? (t.kind === 'income' ? 'รายรับ' : 'อื่นๆ')}
