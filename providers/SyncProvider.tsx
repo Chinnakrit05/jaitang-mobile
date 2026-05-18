@@ -8,6 +8,7 @@ import { pullLedgers } from '../lib/sync/ledgers';
 import { pullCategories } from '../lib/sync/categories';
 import { pullAccounts } from '../lib/sync/accounts';
 import { pullRecurring } from '../lib/sync/recurring';
+import { pullTrips } from '../lib/sync/trips';
 import { listLocalLedgers } from '../lib/db/ledgers';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
@@ -60,13 +61,16 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const localLedgers = await listLocalLedgers();
       const ledgerIds = localLedgers.map((l) => l.id);
 
-      // 3. Per-ledger pulls (categories + accounts + recurring in
-      // parallel — all small, all read-only mirrors).
-      const [catResult, accResult, recResult] = await Promise.all([
-        pullCategories({ ledgerIds }),
-        pullAccounts({ ledgerIds }),
-        pullRecurring({ ledgerIds }),
-      ]);
+      // 3. Per-ledger pulls — sequential, NOT Promise.all.
+      // Each pull wraps its writes in `db.withTransactionAsync`, and
+      // expo-sqlite serializes transactions on a single connection: if
+      // we kick off three in parallel they collide ("cannot rollback -
+      // no transaction is active"). Sequential is plenty fast for these
+      // tables (single digits to dozens of rows each).
+      const catResult = await pullCategories({ ledgerIds });
+      const accResult = await pullAccounts({ ledgerIds });
+      const recResult = await pullRecurring({ ledgerIds });
+      const tripResult = await pullTrips({ ledgerIds });
 
       // 4. Transactions last (push-then-pull, may take longer).
       const txResult = await syncTransactions({ ledgerIds });
@@ -80,10 +84,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (catResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-categories'] });
       if (accResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-accounts'] });
       if (recResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-recurring'] });
+      if (tripResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-trips'] });
       if (txResult.pulled > 0 || txResult.pushed > 0) {
         qc.invalidateQueries({ queryKey: ['local-tx'] });
       }
-    } catch {
+    } catch (e) {
+      // Log the actual error so it's debuggable in the Expo console
+      // instead of just flipping the badge to a generic "Sync error".
+      console.error('[SyncProvider] sync cycle failed:', e);
       setStatus('error');
     } finally {
       inflight.current = false;

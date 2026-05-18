@@ -3,6 +3,7 @@ import { ActivityIndicator, Pressable, Text, TextInput, View } from 'react-nativ
 import { useTranslation } from 'react-i18next';
 
 import { signInWithEmail, signInWithGoogle } from '../../lib/auth';
+import { useTheme } from '../../providers/ThemeProvider';
 
 /**
  * Minimal sign-in screen — Google button + a dev-only email/password
@@ -12,6 +13,7 @@ import { signInWithEmail, signInWithGoogle } from '../../lib/auth';
  */
 export default function LoginScreen() {
   const { t } = useTranslation();
+  const c = useTheme().colors;
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -56,33 +58,59 @@ export default function LoginScreen() {
   }
 
   return (
-    <View className="flex-1 items-center justify-center bg-white px-6">
-      <Text className="text-3xl font-semibold mb-2">Jaitang</Text>
-      <Text className="text-sm text-zinc-500 text-center mb-10">
+    <View
+      className="flex-1 items-center justify-center px-6"
+      style={{ backgroundColor: c.bg }}
+    >
+      <Text
+        className="text-3xl font-semibold mb-2"
+        style={{ color: c.text }}
+      >
+        Jaitang
+      </Text>
+      <Text
+        className="text-sm text-center mb-10"
+        style={{ color: c.textSecondary }}
+      >
         {t('landing.subtitle', 'สมุดบัญชีในใจ')}
       </Text>
 
       <Pressable
         onPress={onSignIn}
         disabled={pending}
-        className="w-full max-w-xs px-6 py-3 rounded-xl bg-zinc-900 active:opacity-80"
+        className="w-full max-w-xs px-6 py-3 rounded-xl active:opacity-80"
+        style={{ backgroundColor: c.accent }}
       >
         {pending ? (
-          <ActivityIndicator color="#fff" />
+          <ActivityIndicator color={c.accentText} />
         ) : (
-          <Text className="text-white text-center font-semibold">
+          <Text
+            className="text-center font-semibold"
+            style={{ color: c.accentText }}
+          >
             {t('login.googleButton', 'Continue with Google')}
           </Text>
         )}
       </Pressable>
 
       {error && (
-        <Text className="mt-4 text-xs text-red-600 text-center">{error}</Text>
+        <Text
+          className="mt-4 text-xs text-center"
+          style={{ color: c.expense }}
+        >
+          {error}
+        </Text>
       )}
 
       {__DEV__ && (
-        <View className="w-full max-w-xs mt-10 pt-6 border-t border-zinc-200">
-          <Text className="text-[10px] uppercase tracking-wider text-zinc-400 mb-2 text-center">
+        <View
+          className="w-full max-w-xs mt-10 pt-6 border-t"
+          style={{ borderTopColor: c.border }}
+        >
+          <Text
+            className="text-[10px] uppercase tracking-wider mb-2 text-center"
+            style={{ color: c.textMuted }}
+          >
             Dev sign-in
           </Text>
           <TextInput
@@ -92,24 +120,43 @@ export default function LoginScreen() {
             autoCorrect={false}
             keyboardType="email-address"
             placeholder="email"
-            className="px-3 py-2.5 mb-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            placeholderTextColor={c.textMuted}
+            className="px-3 py-2.5 mb-2 rounded-lg border text-sm"
+            style={{
+              backgroundColor: c.card,
+              borderColor: c.border,
+              color: c.text,
+            }}
           />
           <TextInput
             value={devPassword}
             onChangeText={setDevPassword}
             secureTextEntry
             placeholder="password"
-            className="px-3 py-2.5 mb-2 rounded-lg border border-zinc-200 bg-zinc-50 text-sm"
+            placeholderTextColor={c.textMuted}
+            className="px-3 py-2.5 mb-2 rounded-lg border text-sm"
+            style={{
+              backgroundColor: c.card,
+              borderColor: c.border,
+              color: c.text,
+            }}
           />
           <Pressable
             onPress={onDevSignIn}
             disabled={pending || !devEmail || !devPassword}
-            className="w-full px-4 py-2.5 rounded-lg border border-zinc-300 active:opacity-60 disabled:opacity-40"
+            className="w-full px-4 py-2.5 rounded-lg border active:opacity-60 disabled:opacity-40"
+            style={{
+              borderColor: c.border,
+              backgroundColor: c.card,
+            }}
           >
             {pending ? (
-              <ActivityIndicator />
+              <ActivityIndicator color={c.accent} />
             ) : (
-              <Text className="text-center text-sm font-medium text-zinc-700">
+              <Text
+                className="text-center text-sm font-medium"
+                style={{ color: c.text }}
+              >
                 Dev sign in
               </Text>
             )}

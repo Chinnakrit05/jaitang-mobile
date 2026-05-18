@@ -7,15 +7,22 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useActiveTrip } from '../../providers/ActiveTripProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import { useCategories } from '../../lib/queries/categories';
 import { useCreateTransaction } from '../../lib/queries/transactions-local';
+import {
+  useRemoveShortcut,
+  useShortcuts,
+} from '../../lib/queries/shortcuts';
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
+import type { Shortcut } from '../../lib/shortcuts';
 import { ShibaMascot } from '../../components/ShibaMascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
@@ -59,10 +66,15 @@ function CloseIcon({ color, size }: { color: string; size: number }) {
 }
 
 export default function QuickAddScreen() {
+  const { t } = useTranslation();
   const { ledger } = useActiveLedger();
+  const { trip: activeTrip } = useActiveTrip();
   const cats = useCategories(ledger?.id);
   const create = useCreateTransaction();
+  const shortcuts = useShortcuts(ledger?.id);
+  const removeShortcut = useRemoveShortcut();
   const c = useTheme().colors;
+  const insets = useSafeAreaInsets();
 
   const [kind, setKind] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
@@ -94,6 +106,17 @@ export default function QuickAddScreen() {
     setError(null);
   }
 
+  // Tapping a shortcut prefills the form from a saved template. The
+  // user can still tweak any field before pressing save.
+  function applyShortcut(s: Shortcut) {
+    setKind(s.kind);
+    setAmount(s.amount > 0 ? String(s.amount) : '');
+    setNote(s.note ?? '');
+    setCategoryId(s.category_id);
+    setPayment(s.payment_method ?? 'cash');
+    setError(null);
+  }
+
   function close() {
     if (router.canGoBack()) router.back();
     else router.replace('/(app)/dashboard');
@@ -103,11 +126,11 @@ export default function QuickAddScreen() {
     setError(null);
     const value = Number(amount.replace(/,/g, ''));
     if (!ledger) {
-      setError('ยังไม่มีสมุดบัญชี');
+      setError(t('quick.noLedgerError'));
       return;
     }
     if (!Number.isFinite(value) || value <= 0) {
-      setError('ใส่จำนวนเงินก่อน');
+      setError(t('quick.amountRequired'));
       return;
     }
     try {
@@ -117,6 +140,10 @@ export default function QuickAddScreen() {
         amount: value,
         note: note.trim() || null,
         category_id: categoryId,
+        // Auto-tag the new transaction to the active trip (if any) so
+        // the user doesn't have to remember — matches the web app's
+        // "active trip banner" behavior.
+        trip_id: activeTrip?.id ?? null,
         payment_method: payment,
         occurred_at: new Date().toISOString(),
       });
@@ -124,7 +151,7 @@ export default function QuickAddScreen() {
       router.replace('/(app)/transactions');
     } catch (e) {
       console.error('createTransaction failed:', e);
-      const msg = e instanceof Error ? e.message : 'บันทึกไม่สำเร็จ';
+      const msg = e instanceof Error ? e.message : t('quick.saveFailed');
       setError(msg);
     }
   }
@@ -135,7 +162,7 @@ export default function QuickAddScreen() {
       style={{ backgroundColor: c.bg }}
       edges={['top']}
     >
-      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 96, gap: 16 }}>
+      <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 136, gap: 16 }}>
         {/* Header */}
         <View className="flex-row items-center justify-between">
           <Pressable
@@ -152,11 +179,11 @@ export default function QuickAddScreen() {
             <CloseIcon color={c.text} size={18} />
           </Pressable>
           <Text style={{ color: c.text, fontSize: 17, fontWeight: '700' }}>
-            เพิ่มรายการ
+            {t('dashboard.addTransaction')}
           </Text>
           <Pressable onPress={reset} className="px-3 py-2">
             <Text style={{ color: c.accent, fontSize: 13, fontWeight: '700' }}>
-              เคลียร์
+              {t('quick.clear')}
             </Text>
           </Pressable>
         </View>
@@ -185,11 +212,96 @@ export default function QuickAddScreen() {
             style={{ backgroundColor: c.card }}
           >
             <Text style={{ color: c.text, fontSize: 13 }}>
-              วันนี้บันทึก{' '}
-              <Text style={{ fontWeight: '700' }}>อะไรน้า?</Text> 🦴
+              {t('quick.greetingPrefix')}{' '}
+              <Text style={{ fontWeight: '700' }}>{t('quick.greetingStrong')}</Text> 🦴
             </Text>
           </View>
         </View>
+
+        {/* Shortcuts row — saved templates from the long-press action
+            sheet. Tap to prefill, long-press to remove. Hidden when the
+            user hasn't saved any yet. */}
+        {(shortcuts.data ?? []).length > 0 && (
+          <View>
+            <Text
+              style={{
+                color: c.textSecondary,
+                fontSize: 11,
+                fontWeight: '700',
+                marginBottom: 8,
+                marginLeft: 2,
+                textTransform: 'uppercase',
+                letterSpacing: 0.5,
+              }}
+            >
+              ⚡️ Shortcut
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingRight: 4 }}
+            >
+              {(shortcuts.data ?? []).map((s) => (
+                <Pressable
+                  key={s.id}
+                  onPress={() => applyShortcut(s)}
+                  onLongPress={() =>
+                    removeShortcut.mutate({
+                      id: s.id,
+                      ledger_id: s.ledger_id,
+                    })
+                  }
+                  delayLongPress={400}
+                  style={{
+                    backgroundColor: c.card,
+                    paddingHorizontal: 12,
+                    paddingVertical: 8,
+                    borderRadius: 14,
+                    flexDirection: 'row',
+                    alignItems: 'center',
+                    gap: 8,
+                    minWidth: 110,
+                  }}
+                >
+                  <EmojiOrIcon value={s.icon} fallback="sparkle" size={18} />
+                  <View>
+                    <Text
+                      numberOfLines={1}
+                      style={{
+                        color: c.text,
+                        fontSize: 12,
+                        fontWeight: '600',
+                        maxWidth: 100,
+                      }}
+                    >
+                      {s.name}
+                    </Text>
+                    <Text
+                      style={{
+                        color: s.kind === 'income' ? c.income : c.expense,
+                        fontSize: 11,
+                        fontWeight: '700',
+                      }}
+                    >
+                      {s.kind === 'income' ? '+' : '−'}฿
+                      {Math.round(s.amount).toLocaleString('en-US')}
+                    </Text>
+                  </View>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <Text
+              style={{
+                color: c.textMuted,
+                fontSize: 10,
+                marginTop: 4,
+                marginLeft: 2,
+              }}
+            >
+              💡 {t('quick.shortcutHint')}
+            </Text>
+          </View>
+        )}
 
         {/* Kind toggle — segmented control */}
         <View
@@ -217,7 +329,7 @@ export default function QuickAddScreen() {
                     fontWeight: '700',
                   }}
                 >
-                  {k === 'expense' ? 'รายจ่าย' : 'รายรับ'}
+                  {k === 'expense' ? t('common.expense') : t('common.income')}
                 </Text>
               </Pressable>
             );
@@ -237,7 +349,7 @@ export default function QuickAddScreen() {
               fontSize: 13,
             }}
           >
-            จำนวนเงิน
+            {t('common.amount')}
           </Text>
           <View className="flex-row items-baseline justify-center gap-1 mt-2">
             <Text
@@ -278,21 +390,21 @@ export default function QuickAddScreen() {
               marginLeft: 2,
             }}
           >
-            จ่ายด้วย
+            {t('quick.paymentMethod')}
           </Text>
           <View className="flex-row gap-3">
             <PaymentCard
               colors={c}
               icon="💵"
-              title="เงินสด"
-              subtitle="ในกระเป๋า"
+              title={t('quick.cash')}
+              subtitle={t('quick.cashHint')}
               selected={payment === 'cash'}
               onPress={() => setPayment('cash')}
             />
             <PaymentCard
               colors={c}
               icon="🏦"
-              title="โอน"
+              title={t('quick.transfer')}
               subtitle="PromptPay"
               selected={payment === 'transfer'}
               onPress={() => setPayment('transfer')}
@@ -311,7 +423,7 @@ export default function QuickAddScreen() {
               marginLeft: 2,
             }}
           >
-            เลือกหมวด
+            {t('quick.chooseCategory')}
           </Text>
           {cats.isLoading ? (
             <ActivityIndicator color={c.accent} />
@@ -321,7 +433,7 @@ export default function QuickAddScreen() {
               className="py-3 items-center"
             >
               <Text style={{ color: c.textSecondary, fontSize: 12 }}>
-                ยังไม่มีหมวด — กดเพื่อสร้างหมวดแรก
+                {t('quick.noCategories')}
               </Text>
             </Pressable>
           ) : (
@@ -402,7 +514,7 @@ export default function QuickAddScreen() {
                         fontWeight: '500',
                       }}
                     >
-                      ดูเพิ่ม +{overflowCount}
+                      {t('quick.showMore', { count: overflowCount })}
                     </Text>
                   </Pressable>
                 </View>
@@ -421,7 +533,7 @@ export default function QuickAddScreen() {
             <TextInput
               value={note}
               onChangeText={setNote}
-              placeholder="เพิ่มโน้ต (ไม่บังคับ)"
+              placeholder={t('common.noteOptional')}
               placeholderTextColor={c.textMuted}
               style={{
                 color: c.text,
@@ -433,53 +545,77 @@ export default function QuickAddScreen() {
           </View>
         </View>
 
-        {error && (
-          <Text
-            className="text-center"
-            style={{ color: c.expense, fontSize: 13 }}
-          >
-            {error}
-          </Text>
-        )}
-
-        {/* Submit — full pill */}
-        <Pressable
-          onPress={save}
-          disabled={create.isPending}
+      </ScrollView>
+      <View
+        pointerEvents="box-none"
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: Math.max(insets.bottom, 8),
+          paddingHorizontal: 16,
+        }}
+      >
+        <View
           style={{
-            backgroundColor: c.accent,
-            paddingVertical: 16,
-            borderRadius: 999,
-            alignItems: 'center',
-            flexDirection: 'row',
-            justifyContent: 'center',
-            gap: 8,
-            shadowColor: c.accent,
-            shadowOpacity: 0.3,
-            shadowRadius: 12,
-            shadowOffset: { width: 0, height: 6 },
-            elevation: 4,
-            opacity: create.isPending ? 0.6 : 1,
+            backgroundColor: c.card,
+            borderRadius: 24,
+            padding: 10,
+            borderWidth: 1,
+            borderColor: c.border,
+            shadowColor: '#000000',
+            shadowOpacity: 0.12,
+            shadowRadius: 18,
+            shadowOffset: { width: 0, height: 8 },
+            elevation: 8,
           }}
         >
-          {create.isPending ? (
-            <ActivityIndicator color="#FFFFFF" />
-          ) : (
-            <>
-              <Text style={{ fontSize: 18 }}>🦴</Text>
-              <Text
-                style={{
-                  color: '#FFFFFF',
-                  fontSize: 15,
-                  fontWeight: '700',
-                }}
-              >
-                บันทึกแล้ว น้องชิบะ ดีใจ
-              </Text>
-            </>
+          {error && (
+            <Text
+              className="text-center"
+              style={{ color: c.expense, fontSize: 12, marginBottom: 8 }}
+            >
+              {error}
+            </Text>
           )}
-        </Pressable>
-      </ScrollView>
+          <Pressable
+            onPress={save}
+            disabled={create.isPending}
+            style={{
+              backgroundColor: c.accent,
+              paddingVertical: 15,
+              borderRadius: 999,
+              alignItems: 'center',
+              flexDirection: 'row',
+              justifyContent: 'center',
+              gap: 8,
+              shadowColor: c.accent,
+              shadowOpacity: 0.3,
+              shadowRadius: 12,
+              shadowOffset: { width: 0, height: 6 },
+              elevation: 4,
+              opacity: create.isPending ? 0.6 : 1,
+            }}
+          >
+            {create.isPending ? (
+              <ActivityIndicator color="#FFFFFF" />
+            ) : (
+              <>
+                <Text style={{ fontSize: 18 }}>🦴</Text>
+                <Text
+                  style={{
+                    color: '#FFFFFF',
+                    fontSize: 15,
+                    fontWeight: '700',
+                  }}
+                >
+                  {t('common.save')}
+                </Text>
+              </>
+            )}
+          </Pressable>
+        </View>
+      </View>
     </SafeAreaView>
   );
 }

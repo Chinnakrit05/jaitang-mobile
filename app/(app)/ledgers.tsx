@@ -651,7 +651,10 @@ function ShareModal({
   // QR via qrserver.com — no extra dependency needed. The URL encoded
   // is just the invite code (the recipient pastes it into the "join"
   // input on their device).
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(state.code)}&color=3D2A1E&bgcolor=FFFFFF`;
+  const qrDark = colors.bg === '#000000' || colors.bg.startsWith('#1') || colors.bg.startsWith('#0');
+  const qrFg = qrDark ? 'FFEDD5' : '3D2A1E';
+  const qrBg = qrDark ? colors.cardElevated.replace('#', '') : 'FFFFFF';
+  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(state.code)}&color=${qrFg}&bgcolor=${qrBg}`;
 
   const expiresText = state.expiresAt
     ? new Date(state.expiresAt).toLocaleDateString('th-TH', {
@@ -708,9 +711,11 @@ function ShareModal({
         {/* QR */}
         <View
           style={{
-            backgroundColor: '#FFFFFF',
+            backgroundColor: qrDark ? colors.cardElevated : '#FFFFFF',
             padding: 12,
             borderRadius: 16,
+            borderWidth: 1,
+            borderColor: colors.border,
           }}
         >
           <Image

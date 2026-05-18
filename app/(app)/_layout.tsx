@@ -2,6 +2,7 @@ import { Redirect, Tabs } from 'expo-router';
 import { ActivityIndicator, View } from 'react-native';
 
 import { useAuth } from '../../providers/AuthProvider';
+import { useTheme } from '../../providers/ThemeProvider';
 import { AppTabBar } from '../../components/AppTabBar';
 
 /**
@@ -17,6 +18,7 @@ import { AppTabBar } from '../../components/AppTabBar';
  */
 export default function AppLayout() {
   const { session, loading } = useAuth();
+  const c = useTheme().colors;
   if (loading) {
     return (
       <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
@@ -28,7 +30,15 @@ export default function AppLayout() {
   return (
     <Tabs
       tabBar={(props) => <AppTabBar {...props} />}
-      screenOptions={{ headerShown: false }}
+      screenOptions={{
+        headerShown: false,
+        animation: 'shift',
+        sceneStyle: { backgroundColor: c.bg },
+        transitionSpec: {
+          animation: 'timing',
+          config: { duration: 240 },
+        },
+      }}
     >
       <Tabs.Screen name="dashboard" />
       <Tabs.Screen name="transactions" />
@@ -40,8 +50,10 @@ export default function AppLayout() {
       <Tabs.Screen name="settings" options={{ href: null }} />
       <Tabs.Screen name="categories" options={{ href: null }} />
       <Tabs.Screen name="recurring" options={{ href: null }} />
+      <Tabs.Screen name="trips" options={{ href: null }} />
       <Tabs.Screen name="ledgers" options={{ href: null }} />
       <Tabs.Screen name="onboarding-ledger" options={{ href: null }} />
+      <Tabs.Screen name="edit-transaction" options={{ href: null }} />
     </Tabs>
   );
 }

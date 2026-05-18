@@ -1,14 +1,25 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useTranslation } from 'react-i18next';
+import Animated, {
+  FadeInDown,
+  useAnimatedStyle,
+  useSharedValue,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from 'react-native-reanimated';
 
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
+import { useActiveTrip } from '../../providers/ActiveTripProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import { useLocalMonthTransactions } from '../../lib/queries/transactions-local';
 import { useCategories } from '../../lib/queries/categories';
-import { formatCurrency } from '../../lib/format';
+import { useTrips } from '../../lib/queries/trips';
 import { Donut, type DonutSlice } from '../../components/Donut';
 import { ShibaMascot } from '../../components/ShibaMascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
@@ -42,23 +53,11 @@ const CATEGORY_PALETTE = [
   '#34D399', // green
 ];
 
-const THAI_MONTHS = [
-  'มกราคม',
-  'กุมภาพันธ์',
-  'มีนาคม',
-  'เมษายน',
-  'พฤษภาคม',
-  'มิถุนายน',
-  'กรกฎาคม',
-  'สิงหาคม',
-  'กันยายน',
-  'ตุลาคม',
-  'พฤศจิกายน',
-  'ธันวาคม',
-];
-
-function formatThaiMonth(d: Date) {
-  return `${THAI_MONTHS[d.getMonth()]} ${d.getFullYear() + 543}`;
+function formatMonth(d: Date, locale: string) {
+  return new Intl.DateTimeFormat(locale, {
+    month: 'long',
+    year: 'numeric',
+  }).format(d);
 }
 
 function formatTime(iso: string) {
@@ -70,12 +69,102 @@ function formatTime(iso: string) {
   }
 }
 
+function formatPct(value: number, total: number) {
+  if (total <= 0) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
+/**
+ * Tween a JS number toward `target` over `duration` ms using an
+ * ease-out cubic curve. Lightweight (uses requestAnimationFrame, no
+ * native bridge), perfect for rolling balance displays. Re-fires when
+ * `target` changes so the number animates to the new value smoothly.
+ */
+function useCountUp(target: number, duration = 800): number {
+  const [value, setValue] = useState(target);
+  const fromRef = useRef(target);
+
+  useEffect(() => {
+    const from = fromRef.current;
+    const start = Date.now();
+    let raf: number;
+    const tick = () => {
+      const elapsed = Date.now() - start;
+      const progress = Math.min(elapsed / duration, 1);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const current = from + (target - from) * eased;
+      setValue(current);
+      if (progress < 1) {
+        raf = requestAnimationFrame(tick);
+      } else {
+        fromRef.current = target;
+      }
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [target, duration]);
+
+  return value;
+}
+
+/**
+ * Subtle floating bounce — translates the wrapped child up a few px
+ * and back, forever. Used on the shiba mascot to give it some life
+ * without being distracting.
+ */
+function useFloatingBounce(amplitude = 3, durationMs = 2200) {
+  const offset = useSharedValue(0);
+  useEffect(() => {
+    offset.value = withRepeat(
+      withSequence(
+        withTiming(-amplitude, {
+          duration: durationMs / 2,
+          easing: Easing.inOut(Easing.ease),
+        }),
+        withTiming(0, {
+          duration: durationMs / 2,
+          easing: Easing.inOut(Easing.ease),
+        }),
+      ),
+      -1,
+    );
+  }, [amplitude, durationMs, offset]);
+  return useAnimatedStyle(() => ({
+    transform: [{ translateY: offset.value }],
+  }));
+}
+
 export default function DashboardScreen() {
+  const { t, i18n } = useTranslation();
   const { session } = useAuth();
   const { ledger, loading: ledgerLoading } = useActiveLedger();
+  const { trip: activeTrip } = useActiveTrip();
   const txs = useLocalMonthTransactions(ledger?.id);
   const cats = useCategories(ledger?.id);
+  const trips = useTrips(ledger?.id);
   const c = useTheme().colors;
+  const locale = i18n.resolvedLanguage ?? i18n.language;
+
+  // Trip lookup so the recent-tx list can show a per-row trip chip
+  // (same pattern as transactions.tsx).
+  const tripById = useMemo(
+    () => new Map((trips.data ?? []).map((t) => [t.id, t])),
+    [trips.data],
+  );
+
+  // Tally just this trip's transactions so the card can show the
+  // running total. The list is already loaded for the dashboard's other
+  // sections, so this is a cheap filter — no extra DB hit.
+  const tripStats = useMemo(() => {
+    if (!activeTrip) return null;
+    const tripTxs = (txs.data ?? []).filter(
+      (t) => t.trip_id === activeTrip.id,
+    );
+    const spent = tripTxs
+      .filter((t) => t.kind === 'expense')
+      .reduce((s, t) => s + t.amount, 0);
+    return { count: tripTxs.length, spent };
+  }, [activeTrip, txs.data]);
 
   const monthIncome = (txs.data ?? [])
     .filter((t) => t.kind === 'income')
@@ -96,7 +185,7 @@ export default function DashboardScreen() {
         const cat = cats.data?.find((c) => c.id === cid);
         return {
           id: cid,
-          name: cat?.name ?? 'อื่นๆ',
+          name: cat?.name ?? t('common.uncategorized'),
           icon: cat?.icon ?? null,
           value,
         };
@@ -108,7 +197,7 @@ export default function DashboardScreen() {
       color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length],
     }));
     return { rows, slices };
-  }, [txs.data, cats.data]);
+  }, [txs.data, cats.data, t]);
 
   const recent = useMemo(() => {
     return [...(txs.data ?? [])]
@@ -119,12 +208,25 @@ export default function DashboardScreen() {
   const budgetCap = 42000;
   const moodPct = Math.min(100, Math.round((monthExpense / budgetCap) * 100));
   const moodLabel =
-    moodPct < 70 ? 'กำลังแฮปปี้' : moodPct < 90 ? 'เริ่มกังวล' : 'เกินงบแล้ว';
+    moodPct < 70
+      ? t('dashboard.moodHappy')
+      : moodPct < 90
+        ? t('dashboard.moodWorried')
+        : t('dashboard.moodOver');
 
   const userName =
     (session?.user.user_metadata?.full_name as string | undefined) ??
     session?.user.email?.split('@')[0] ??
-    'เพื่อน';
+    t('dashboard.friendFallback');
+
+  // Animated balance figures — roll up from the previous value rather
+  // than snap. Round only at the display step so the count looks smooth.
+  const animatedNet = useCountUp(monthNet);
+  const animatedIncome = useCountUp(monthIncome);
+  const animatedExpense = useCountUp(monthExpense);
+  const animatedMoodPct = useCountUp(moodPct);
+
+  const shibaBounce = useFloatingBounce();
 
   return (
     <SafeAreaView
@@ -136,7 +238,10 @@ export default function DashboardScreen() {
         contentContainerStyle={{ padding: 16, paddingBottom: 96, gap: 16 }}
       >
         {/* 1. Greeting */}
-        <View className="flex-row items-center justify-between">
+        <Animated.View
+          entering={FadeInDown.duration(380).delay(0)}
+          className="flex-row items-center justify-between"
+        >
           <View className="flex-row items-center gap-3">
             <View
               className="w-11 h-11 rounded-full items-center justify-center"
@@ -146,7 +251,7 @@ export default function DashboardScreen() {
             </View>
             <View>
               <Text style={{ color: c.textSecondary, fontSize: 12 }}>
-                สวัสดี ✨
+                {t('dashboard.helloShort')}
               </Text>
               <Text
                 style={{ color: c.text, fontSize: 16, fontWeight: '600' }}
@@ -161,12 +266,14 @@ export default function DashboardScreen() {
           >
             <Text style={{ fontSize: 13 }}>🔥</Text>
             <Text style={{ color: c.accent, fontSize: 12, fontWeight: '700' }}>
-              12 วัน
+              {t('dashboard.streakDays', { count: 12 })}
             </Text>
           </View>
-        </View>
+        </Animated.View>
 
-        <SyncStatusBadge />
+        <Animated.View entering={FadeInDown.duration(380).delay(60)}>
+          <SyncStatusBadge />
+        </Animated.View>
 
         {ledgerLoading ? (
           <ActivityIndicator color={c.accent} />
@@ -184,13 +291,13 @@ export default function DashboardScreen() {
                 marginTop: 8,
               }}
             >
-              ยังไม่มีสมุดบัญชี
+              {t('dashboard.noLedgerTitle')}
             </Text>
             <Text
               className="text-center"
               style={{ color: c.textSecondary, fontSize: 13, marginTop: 4 }}
             >
-              สร้างสมุดเล่มแรกเพื่อเริ่มจดรายรับ-รายจ่าย
+              {t('dashboard.noLedgerHint')}
             </Text>
             <Pressable
               onPress={() => router.push('/(app)/onboarding-ledger')}
@@ -214,32 +321,34 @@ export default function DashboardScreen() {
                   fontWeight: '700',
                 }}
               >
-                + สร้างสมุดบัญชี
+                {t('dashboard.createLedger')}
               </Text>
             </Pressable>
           </View>
         ) : (
           <>
             {/* 2. Hero balance card — text on the left, shiba in the
-                top-right corner. The card uses `position: relative` so
-                ShibaMascot can absolute-position itself; everything
-                below has rightward padding to leave room for the mascot
-                without overlapping. */}
-            <View
+                top-right corner. Mascot floats with a subtle bounce so
+                it doesn't feel frozen on screen; balance numbers tween
+                in from their previous values. */}
+            <Animated.View
+              entering={FadeInDown.duration(420).delay(120)}
               className="rounded-3xl p-5 overflow-hidden"
               style={{
                 backgroundColor: c.cardElevated,
                 position: 'relative',
               }}
             >
-              <View style={{ position: 'absolute', top: 8, right: 8 }}>
+              <Animated.View
+                style={[{ position: 'absolute', top: 8, right: 8 }, shibaBounce]}
+              >
                 <ShibaMascot size={76} />
-              </View>
+              </Animated.View>
 
               <Text
                 style={{ color: c.textSecondary, fontSize: 12, paddingRight: 80 }}
               >
-                ยอดคงเหลือเดือนนี้
+                {t('dashboard.monthBalance')}
               </Text>
               <Text
                 style={{
@@ -249,7 +358,7 @@ export default function DashboardScreen() {
                   paddingRight: 80,
                 }}
               >
-                ‹ {formatThaiMonth(new Date())} ›
+                ‹ {formatMonth(new Date(), locale)} ›
               </Text>
               <Text
                 style={{
@@ -259,73 +368,138 @@ export default function DashboardScreen() {
                   marginTop: 14,
                 }}
               >
-                ฿ {Math.round(monthNet).toLocaleString('en-US')}
+                ฿ {Math.round(animatedNet).toLocaleString('en-US')}
               </Text>
 
               <View className="flex-row gap-2 mt-3">
                 <View
                   className="flex-row items-center gap-1 px-3 py-1.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.65)' }}
+                  style={{ backgroundColor: c.chip }}
                 >
                   <Text style={{ color: c.income, fontSize: 11 }}>▲</Text>
                   <Text
                     style={{ color: c.text, fontSize: 12, fontWeight: '600' }}
                   >
-                    รายรับ ฿{Math.round(monthIncome).toLocaleString('en-US')}
+                    {t('common.income')} ฿{Math.round(animatedIncome).toLocaleString('en-US')}
                   </Text>
                 </View>
                 <View
                   className="flex-row items-center gap-1 px-3 py-1.5 rounded-full"
-                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.65)' }}
+                  style={{ backgroundColor: c.chip }}
                 >
                   <Text style={{ color: c.expense, fontSize: 11 }}>▼</Text>
                   <Text
                     style={{ color: c.text, fontSize: 12, fontWeight: '600' }}
                   >
-                    รายจ่าย ฿{Math.round(monthExpense).toLocaleString('en-US')}
+                    {t('common.expense')} ฿{Math.round(animatedExpense).toLocaleString('en-US')}
                   </Text>
                 </View>
               </View>
 
-              {/* Mood + progress — same as before, sits at the bottom
-                  of the hero card as a soft white sub-pill. */}
+              {/* Mood + progress — bar fill width tweens with the
+                  count-up so it visually tracks the number. */}
               <View
                 className="mt-4 px-3 py-2.5 rounded-2xl"
-                style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}
+                style={{ backgroundColor: c.chip }}
               >
                 <Text style={{ color: c.text, fontSize: 13 }}>
-                  น้องชิบะ
+                  {t('dashboard.mascotName')}
                   <Text style={{ color: c.textSecondary, fontSize: 12 }}>
                     {'  '}
-                    {moodLabel} · {moodPct}% ของงบ
+                    {moodLabel} · {t('dashboard.budgetPercent', { pct: Math.round(animatedMoodPct) })}
                   </Text>
                 </Text>
                 <View
-                  className="h-1.5 rounded-full mt-2"
-                  style={{ backgroundColor: 'rgba(255, 255, 255, 0.6)' }}
+                  className="h-1.5 rounded-full mt-2 overflow-hidden"
+                  style={{ backgroundColor: c.bg }}
                 >
                   <View
                     className="h-1.5 rounded-full"
-                    style={{ backgroundColor: c.accent, width: `${moodPct}%` }}
+                    style={{
+                      backgroundColor: c.accent,
+                      width: `${animatedMoodPct}%`,
+                    }}
                   />
                 </View>
               </View>
-            </View>
+            </Animated.View>
 
-            {/* 3. Trip card — HIDDEN until the trips table + sync mirror
-                land. The mockup keeps a slot here; we'll re-enable when
-                an `useActiveTrip()` hook + trips mirror exist so the
-                values come from real data instead of being hardcoded. */}
+            {/* 3. Trip card — shown only when there's an active trip.
+                The tally counts only this-month transactions tagged to
+                the trip (cheap filter on the already-loaded txs.data). */}
+            {activeTrip && tripStats && (
+              <Animated.View entering={FadeInDown.duration(420).delay(200)}>
+              <Pressable
+                className="rounded-2xl p-4"
+                style={{ backgroundColor: c.card }}
+                onPress={() => router.push('/(app)/trips')}
+              >
+                <View className="flex-row items-center justify-between">
+                  <View className="flex-row items-center gap-3 flex-1 min-w-0">
+                    <View
+                      className="w-10 h-10 rounded-full items-center justify-center"
+                      style={{
+                        backgroundColor:
+                          (activeTrip.color ?? c.trip) + '33',
+                      }}
+                    >
+                      <Text style={{ fontSize: 18 }}>
+                        {activeTrip.icon ?? '✈️'}
+                      </Text>
+                    </View>
+                    <View className="flex-1 min-w-0">
+                      <Text
+                        style={{
+                          color: c.text,
+                          fontSize: 14,
+                          fontWeight: '700',
+                        }}
+                        numberOfLines={1}
+                      >
+                        {activeTrip.name}
+                      </Text>
+                      <Text
+                        style={{
+                          color: c.textSecondary,
+                          fontSize: 11,
+                          marginTop: 1,
+                        }}
+                      >
+                        🟢 {t('dashboard.activeTripMeta', { count: tripStats.count })}
+                      </Text>
+                    </View>
+                  </View>
+                  <View className="items-end">
+                    <Text
+                      style={{
+                        color: c.text,
+                        fontSize: 14,
+                        fontWeight: '700',
+                      }}
+                    >
+                      ฿
+                      {Math.round(tripStats.spent).toLocaleString('en-US')}
+                    </Text>
+                    <Text
+                      style={{ color: c.textSecondary, fontSize: 11 }}
+                    >
+                      {t('dashboard.tripSpend')}
+                    </Text>
+                  </View>
+                </View>
+              </Pressable>
+              </Animated.View>
+            )}
 
             {/* 4. Category breakdown */}
-            <View>
+            <Animated.View entering={FadeInDown.duration(420).delay(280)}>
               <View className="flex-row items-center justify-between mb-3">
                 <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>
-                  สรุปหมวดหมู่
+                  {t('dashboard.categorySummary')}
                 </Text>
                 <Pressable onPress={() => router.push('/(app)/insights')}>
                   <Text style={{ color: c.accent, fontSize: 13, fontWeight: '600' }}>
-                    ดูรายงาน →
+                    {t('nav.insights')} →
                   </Text>
                 </Pressable>
               </View>
@@ -338,7 +512,7 @@ export default function DashboardScreen() {
                   trackColor={c.chip}
                   labelColor={c.textMuted}
                   centerColor={c.text}
-                  label="จ่ายไป"
+                  label={t('dashboard.donutSpent')}
                   centerValue={
                     monthExpense
                       ? `฿${Math.round(monthExpense).toLocaleString('en-US')}`
@@ -348,7 +522,7 @@ export default function DashboardScreen() {
                 <View className="flex-1 gap-2">
                   {breakdown.rows.length === 0 ? (
                     <Text style={{ color: c.textSecondary, fontSize: 12 }}>
-                      ยังไม่มีรายจ่าย — เพิ่มรายการแรกได้เลย
+                      {t('dashboard.noExpensePrompt')}
                     </Text>
                   ) : (
                     breakdown.rows.map((r, i) => (
@@ -364,28 +538,53 @@ export default function DashboardScreen() {
                           }}
                         />
                         <EmojiOrIcon value={r.icon} fallback="sparkle" size={14} />
-                        <Text
-                          numberOfLines={1}
-                          style={{ color: c.text, fontSize: 13, flex: 1 }}
-                        >
-                          {r.name}
-                        </Text>
+                        <View className="flex-1 min-w-0">
+                          <View className="flex-row items-center gap-2">
+                            <Text
+                              numberOfLines={1}
+                              style={{ color: c.text, fontSize: 13, flex: 1 }}
+                            >
+                              {r.name}
+                            </Text>
+                            <Text style={{ color: c.textSecondary, fontSize: 11, fontWeight: '700' }}>
+                              {formatPct(r.value, monthExpense)}
+                            </Text>
+                          </View>
+                          <View className="flex-row items-center gap-2 mt-1">
+                            <View
+                              className="h-1 rounded-full flex-1 overflow-hidden"
+                              style={{ backgroundColor: c.bg }}
+                            >
+                              <AnimatedLegendBar
+                                color={CATEGORY_PALETTE[i % CATEGORY_PALETTE.length]}
+                                pct={
+                                  monthExpense > 0
+                                    ? Math.round((r.value / monthExpense) * 100)
+                                    : 0
+                                }
+                              />
+                            </View>
+                            <Text style={{ color: c.textMuted, fontSize: 10 }}>
+                              ฿{Math.round(r.value).toLocaleString('en-US')}
+                            </Text>
+                          </View>
+                        </View>
                       </View>
                     ))
                   )}
                 </View>
               </View>
-            </View>
+            </Animated.View>
 
             {/* 5. Recent transactions */}
-            <View>
+            <Animated.View entering={FadeInDown.duration(420).delay(360)}>
               <View className="flex-row items-center justify-between mb-3">
                 <Text style={{ color: c.text, fontSize: 16, fontWeight: '600' }}>
-                  รายการล่าสุด
+                  {t('dashboard.recent')}
                 </Text>
                 <Pressable onPress={() => router.push('/(app)/transactions')}>
                   <Text style={{ color: c.accent, fontSize: 13, fontWeight: '600' }}>
-                    ดูทั้งหมด →
+                    {t('dashboard.viewAll')}
                   </Text>
                 </Pressable>
               </View>
@@ -398,11 +597,12 @@ export default function DashboardScreen() {
                     className="p-4 text-center"
                     style={{ color: c.textSecondary, fontSize: 13 }}
                   >
-                    ยังไม่มีรายการในเดือนนี้
+                    {t('dashboard.noMonthTransactions')}
                   </Text>
                 ) : (
                   recent.map((t, idx) => {
                     const cat = cats.data?.find((c) => c.id === t.category_id);
+                    const tripTag = t.trip_id ? tripById.get(t.trip_id) : null;
                     const sign = t.kind === 'income' ? '+' : '−';
                     const signColor = t.kind === 'income' ? c.income : c.text;
                     return (
@@ -425,21 +625,54 @@ export default function DashboardScreen() {
                           />
                         </View>
                         <View className="flex-1">
-                          <Text
-                            numberOfLines={1}
-                            style={{
-                              color: c.text,
-                              fontSize: 14,
-                              fontWeight: '500',
-                            }}
-                          >
-                            {t.note ?? cat?.name ?? 'รายการ'}
-                          </Text>
+                          <View className="flex-row items-center gap-2">
+                            <Text
+                              numberOfLines={1}
+                              style={{
+                                color: c.text,
+                                fontSize: 14,
+                                fontWeight: '500',
+                                flexShrink: 1,
+                              }}
+                            >
+                              {t.note ?? cat?.name ?? i18n.t('dashboard.genericTransaction')}
+                            </Text>
+                            {tripTag && (
+                              <View
+                                style={{
+                                  paddingHorizontal: 6,
+                                  paddingVertical: 2,
+                                  borderRadius: 999,
+                                  backgroundColor:
+                                    (tripTag.color ?? c.trip) + '22',
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: 3,
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <Text style={{ fontSize: 9 }}>
+                                  {tripTag.icon ?? '✈️'}
+                                </Text>
+                                <Text
+                                  numberOfLines={1}
+                                  style={{
+                                    color: tripTag.color ?? c.trip,
+                                    fontSize: 9,
+                                    fontWeight: '700',
+                                    maxWidth: 80,
+                                  }}
+                                >
+                                  {tripTag.name}
+                                </Text>
+                              </View>
+                            )}
+                          </View>
                           <Text
                             style={{ color: c.textMuted, fontSize: 11 }}
                             numberOfLines={1}
                           >
-                            {cat?.name ?? (t.kind === 'income' ? 'รายรับ' : 'อื่นๆ')}
+                            {cat?.name ?? (t.kind === 'income' ? i18n.t('common.income') : i18n.t('common.uncategorized'))}
                             <Text> · </Text>
                             {formatTime(t.occurred_at)}
                           </Text>
@@ -462,10 +695,29 @@ export default function DashboardScreen() {
                   })
                 )}
               </View>
-            </View>
+            </Animated.View>
           </>
         )}
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function AnimatedLegendBar({ color, pct }: { color: string; pct: number }) {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(Math.max(0, Math.min(100, pct)), {
+      duration: 760,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [pct, progress]);
+  const style = useAnimatedStyle(() => ({
+    width: `${progress.value}%`,
+  }));
+  return (
+    <Animated.View
+      className="h-1 rounded-full"
+      style={[{ backgroundColor: color }, style]}
+    />
   );
 }

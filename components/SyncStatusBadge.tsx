@@ -3,6 +3,7 @@ import { Pressable, Text, View } from 'react-native';
 
 import { useSync } from '../providers/SyncProvider';
 import { countPendingTransactions } from '../lib/db/transactions';
+import { useTheme } from '../providers/ThemeProvider';
 
 /**
  * Tiny status indicator: shows offline / syncing / synced + the count
@@ -10,6 +11,7 @@ import { countPendingTransactions } from '../lib/db/transactions';
  */
 export function SyncStatusBadge() {
   const { status, isOnline, syncNow, lastSyncedAt } = useSync();
+  const c = useTheme().colors;
   const [pending, setPending] = useState(0);
 
   // Refresh the pending count whenever a sync just finished — that's
@@ -28,23 +30,27 @@ export function SyncStatusBadge() {
           ? `${pending} pending`
           : 'Synced';
 
-  const color = !isOnline
-    ? 'bg-zinc-200 text-zinc-600'
+  const colors = !isOnline
+    ? { bg: c.chip, text: c.textSecondary }
     : status === 'syncing'
-      ? 'bg-cyan-100 text-cyan-700'
+      ? { bg: c.tripBg, text: c.trip }
       : status === 'error'
-        ? 'bg-red-100 text-red-700'
+        ? { bg: c.expenseBg, text: c.expense }
         : pending > 0
-          ? 'bg-amber-100 text-amber-700'
-          : 'bg-green-100 text-green-700';
+          ? { bg: c.accentSoft, text: c.accent }
+          : { bg: c.incomeBg, text: c.income };
 
   return (
     <Pressable
       onPress={() => syncNow()}
-      className={`self-start px-2 py-1 rounded-full ${color.split(' ')[0]}`}
+      className="self-start px-2 py-1 rounded-full"
+      style={{ backgroundColor: colors.bg }}
     >
       <View>
-        <Text className={`text-[10px] font-medium ${color.split(' ')[1]}`}>
+        <Text
+          className="text-[10px] font-medium"
+          style={{ color: colors.text }}
+        >
           {label}
         </Text>
       </View>

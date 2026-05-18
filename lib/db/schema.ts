@@ -17,7 +17,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * still hit Supabase directly until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -130,6 +130,26 @@ const STATEMENTS = [
     _sync_state TEXT NOT NULL DEFAULT 'clean'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_recurring_ledger ON recurring_transactions(ledger_id, active DESC, next_run_at)`,
+
+  // ---- v4: trips mirror (pull-only, replace-all) ----
+  // Trips are scoped to a ledger and tag transactions. Like recurring,
+  // the server table doesn't carry `deleted_at` (uses hard DELETE), so
+  // the pull replaces local rows for the synced ledgers.
+  `CREATE TABLE IF NOT EXISTS trips (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT,
+    currency TEXT,
+    starts_at TEXT,
+    ends_at TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_trips_ledger ON trips(ledger_id, archived, starts_at DESC)`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

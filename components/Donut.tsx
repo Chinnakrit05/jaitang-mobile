@@ -1,4 +1,14 @@
+import { useEffect } from 'react';
 import Svg, { Circle, G, Text as SvgText } from 'react-native-svg';
+import Animated, {
+  Easing,
+  type SharedValue,
+  useAnimatedProps,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
+
+const AnimatedCircle = Animated.createAnimatedComponent(Circle);
 
 /**
  * Donut chart with a center label. Pure SVG, no third-party chart lib —
@@ -24,6 +34,8 @@ type Props = {
   centerValue?: string;
   labelColor?: string;
   centerColor?: string;
+  animated?: boolean;
+  animationDuration?: number;
 };
 
 export function Donut({
@@ -35,10 +47,20 @@ export function Donut({
   centerValue,
   labelColor = '#9a958c',
   centerColor = '#3D2A1E',
+  animated = true,
+  animationDuration = 820,
 }: Props) {
   const r = 38;
   const C = 2 * Math.PI * r;
   const total = data.reduce((s, d) => s + d.value, 0);
+  const progress = useSharedValue(animated ? 0 : 1);
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withTiming(1, {
+      duration: animated ? animationDuration : 0,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [animated, animationDuration, data, progress]);
 
   let offset = 0;
   const slices = total > 0 ? data : [];
@@ -56,17 +78,17 @@ export function Donut({
       <G rotation={-90} origin="50, 50">
         {slices.map((slice, i) => {
           const dash = (slice.value / total) * C;
+          const startOffset = offset;
           const node = (
-            <Circle
+            <DonutSegment
               key={i}
-              cx={50}
-              cy={50}
-              r={r}
-              fill="none"
-              stroke={slice.color}
+              color={slice.color}
+              dash={dash}
+              circumference={C}
+              offset={startOffset}
+              progress={progress}
+              radius={r}
               strokeWidth={strokeWidth}
-              strokeDasharray={`${dash} ${C - dash}`}
-              strokeDashoffset={-offset}
             />
           );
           offset += dash;
@@ -97,5 +119,41 @@ export function Donut({
         </SvgText>
       ) : null}
     </Svg>
+  );
+}
+
+function DonutSegment({
+  color,
+  dash,
+  circumference,
+  offset,
+  progress,
+  radius,
+  strokeWidth,
+}: {
+  color: string;
+  dash: number;
+  circumference: number;
+  offset: number;
+  progress: SharedValue<number>;
+  radius: number;
+  strokeWidth: number;
+}) {
+  const animatedProps = useAnimatedProps(() => ({
+    strokeDashoffset: -offset + dash * (1 - progress.value),
+  }));
+
+  return (
+    <AnimatedCircle
+      cx={50}
+      cy={50}
+      r={radius}
+      fill="none"
+      stroke={color}
+      strokeWidth={strokeWidth}
+      strokeDasharray={`${dash} ${circumference - dash}`}
+      animatedProps={animatedProps}
+      strokeLinecap="round"
+    />
   );
 }

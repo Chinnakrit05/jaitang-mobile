@@ -1,6 +1,7 @@
 import { Pressable, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import { useTranslation } from 'react-i18next';
 
 import { useTheme } from '../providers/ThemeProvider';
 import { JtIcon } from './icons/JtIcon';
@@ -23,24 +24,25 @@ import type { IconName } from './icons/icon-names';
 
 type NavItem = {
   route: string;
-  label: string;
+  labelKey: string;
   icon: IconName;
   iconSize?: number;
   fab?: boolean;
 };
 
 const NAV_ITEMS: NavItem[] = [
-  { route: 'dashboard', label: 'หน้าหลัก', icon: 'home' },
-  { route: 'transactions', label: 'รายการ', icon: 'transactions' },
-  { route: 'quick', label: '', icon: 'plus-fab', iconSize: 28, fab: true },
-  { route: 'insights', label: 'รายงาน', icon: 'insights' },
+  { route: 'dashboard', labelKey: 'nav.homeShort', icon: 'home' },
+  { route: 'transactions', labelKey: 'nav.transactions', icon: 'transactions' },
+  { route: 'quick', labelKey: 'nav.quickShort', icon: 'plus-fab', iconSize: 28, fab: true },
+  { route: 'insights', labelKey: 'nav.insights', icon: 'insights' },
   // "เพิ่มเติม" tab — links out to categories, ledgers, settings,
   // sign-out. Replaces the old "Profile" tab so secondary screens have
   // a discoverable entry point without claiming a top-level slot each.
-  { route: 'more', label: 'เพิ่มเติม', icon: 'more' },
+  { route: 'more', labelKey: 'nav.more', icon: 'more' },
 ];
 
 export function AppTabBar({ state, navigation }: BottomTabBarProps) {
+  const { t } = useTranslation();
   const insets = useSafeAreaInsets();
   const c = useTheme().colors;
   const activeColor = c.accent;
@@ -118,7 +120,7 @@ export function AppTabBar({ state, navigation }: BottomTabBarProps) {
                 fontWeight: isActive ? '600' : '400',
               }}
             >
-              {item.label}
+              {t(item.labelKey)}
             </Text>
           </Pressable>
         );

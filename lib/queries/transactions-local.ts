@@ -7,8 +7,11 @@ import {
 import {
   createLocalTransaction,
   deleteLocalTransaction,
+  getLocalTransaction,
   listLocalTransactions,
+  updateLocalTransaction,
   type NewTxInput,
+  type UpdateTxInput,
 } from '../db/transactions';
 import { useAuth } from '../../providers/AuthProvider';
 import { useSync } from '../../providers/SyncProvider';
@@ -55,6 +58,29 @@ export function useDeleteTransaction() {
   return useMutation({
     mutationFn: async (id: string) => {
       await deleteLocalTransaction(id);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: QK });
+      void syncNow();
+    },
+  });
+}
+
+export function useLocalTransaction(id: string | undefined) {
+  return useQuery<LocalTx | null>({
+    queryKey: [...QK, 'one', id],
+    queryFn: () => getLocalTransaction(id!),
+    enabled: !!id,
+  });
+}
+
+export function useUpdateTransaction() {
+  const qc = useQueryClient();
+  const { syncNow } = useSync();
+  return useMutation({
+    mutationFn: async (input: { id: string } & UpdateTxInput) => {
+      const { id, ...patch } = input;
+      await updateLocalTransaction(id, patch);
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: QK });

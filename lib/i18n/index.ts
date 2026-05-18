@@ -25,6 +25,17 @@ const deviceInitial: Locale = (LOCALES as readonly string[]).includes(deviceLang
   ? (deviceLang as Locale)
   : 'th';
 
+export function toSupportedLocale(value: string | undefined | null): Locale {
+  const base = value?.split('-')[0];
+  return base && (LOCALES as readonly string[]).includes(base)
+    ? (base as Locale)
+    : 'th';
+}
+
+export function currentLocale(): Locale {
+  return toSupportedLocale(i18n.resolvedLanguage ?? i18n.language);
+}
+
 // Same JSON catalogs the web app ships. Curly-brace placeholders in
 // next-intl (e.g. `{count}`) match i18next's default interpolation, so
 // no transformation is needed.
@@ -37,7 +48,11 @@ i18n.use(initReactI18next).init({
   },
   lng: deviceInitial,
   fallbackLng: 'en',
-  interpolation: { escapeValue: false },
+  interpolation: {
+    escapeValue: false,
+    prefix: '{',
+    suffix: '}',
+  },
   // The catalogs use `.` separators in keys (e.g. `theme.modeTitle`).
   // Tell i18next that's a path separator, not a key character.
   keySeparator: '.',

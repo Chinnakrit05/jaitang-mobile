@@ -70,6 +70,95 @@ export async function createLocalTransaction(input: NewTxInput): Promise<string>
   return id;
 }
 
+export type UpdateTxInput = {
+  kind?: 'income' | 'expense';
+  amount?: number;
+  note?: string | null;
+  category_id?: string | null;
+  account_id?: string | null;
+  trip_id?: string | null;
+  payment_method?: 'cash' | 'transfer' | null;
+  occurred_at?: string;
+};
+
+/**
+ * Update a local transaction and queue the change for sync.
+ *
+ * If the row is still `pending_create` (never pushed to the server),
+ * keep it in that state — the next push will upload the edited copy.
+ * Otherwise flip to `pending_update`. Either way the push half of the
+ * sync engine handles both states with the same upsert call.
+ */
+export async function updateLocalTransaction(
+  id: string,
+  patch: UpdateTxInput,
+): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ _sync_state: string }>(
+    `SELECT _sync_state FROM transactions WHERE id = ?`,
+    [id],
+  );
+  if (!row) return;
+  const nextState =
+    row._sync_state === 'pending_create' ? 'pending_create' : 'pending_update';
+
+  const fields: string[] = [];
+  const values: unknown[] = [];
+  if (patch.kind !== undefined) {
+    fields.push('kind = ?');
+    values.push(patch.kind);
+  }
+  if (patch.amount !== undefined) {
+    fields.push('amount = ?');
+    values.push(patch.amount);
+  }
+  if (patch.note !== undefined) {
+    fields.push('note = ?');
+    values.push(patch.note);
+  }
+  if (patch.category_id !== undefined) {
+    fields.push('category_id = ?');
+    values.push(patch.category_id);
+  }
+  if (patch.account_id !== undefined) {
+    fields.push('account_id = ?');
+    values.push(patch.account_id);
+  }
+  if (patch.trip_id !== undefined) {
+    fields.push('trip_id = ?');
+    values.push(patch.trip_id);
+  }
+  if (patch.payment_method !== undefined) {
+    fields.push('payment_method = ?');
+    values.push(patch.payment_method);
+  }
+  if (patch.occurred_at !== undefined) {
+    fields.push('occurred_at = ?');
+    values.push(patch.occurred_at);
+  }
+  const now = new Date().toISOString();
+  fields.push('updated_at = ?');
+  values.push(now);
+  fields.push('_sync_state = ?');
+  values.push(nextState);
+  values.push(id);
+  if (fields.length === 0) return;
+  await db.runAsync(
+    `UPDATE transactions SET ${fields.join(', ')} WHERE id = ?`,
+    values,
+  );
+}
+
+export async function getLocalTransaction(id: string): Promise<LocalTx | null> {
+  const db = await getDb();
+  return (
+    (await db.getFirstAsync<LocalTx>(
+      `SELECT * FROM transactions WHERE id = ? AND deleted_at IS NULL`,
+      [id],
+    )) ?? null
+  );
+}
+
 export async function listLocalTransactions(opts: {
   ledgerId: string;
   limit?: number;

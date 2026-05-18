@@ -14,5 +14,14 @@ export default function AuthLayout() {
   }
   // Signed-in users shouldn't land back on /login.
   if (session) return <Redirect href="/(app)/dashboard" />;
-  return <Stack screenOptions={{ headerShown: false }} />;
+  return (
+    <Stack
+      screenOptions={{
+        headerShown: false,
+        animation: 'fade_from_bottom',
+        animationDuration: 240,
+        gestureEnabled: true,
+      }}
+    />
+  );
 }

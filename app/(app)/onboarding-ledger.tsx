@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useTranslation } from 'react-i18next';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
@@ -39,11 +40,12 @@ const COLOR_PRESETS = [
 const CURRENCY_PRESETS = ['THB', 'USD', 'JPY', 'EUR'];
 
 export default function OnboardingLedgerScreen() {
+  const { t } = useTranslation();
   const create = useCreateLedger();
   const { setActiveLedger } = useActiveLedger();
   const c = useTheme().colors;
 
-  const [name, setName] = useState('สมุดของฉัน');
+  const [name, setName] = useState(() => t('onboarding.defaultLedgerName', { defaultValue: 'My ledger' }));
   const [icon, setIcon] = useState<string>('🦊');
   // Ledger color preset — picked by user, NOT a theme token. Stays
   // brand-fixed across light / dark so the user's chosen color is the
@@ -56,7 +58,7 @@ export default function OnboardingLedgerScreen() {
     setError(null);
     const trimmed = name.trim();
     if (!trimmed) {
-      setError('ใส่ชื่อสมุดก่อน');
+      setError(t('onboarding.nameRequired', { defaultValue: 'Enter a ledger name first' }));
       return;
     }
     try {
@@ -75,7 +77,7 @@ export default function OnboardingLedgerScreen() {
       // instances) — surface their `message`, `code`, and `details` so we
       // can actually see what went wrong instead of a generic fallback.
       console.error('createLedger failed:', e);
-      let msg = 'สร้างไม่สำเร็จ';
+      let msg = t('onboarding.createFailed', { defaultValue: 'Could not create ledger' });
       if (e && typeof e === 'object') {
         const err = e as { message?: unknown; code?: unknown; details?: unknown; hint?: unknown };
         const parts: string[] = [];
@@ -105,14 +107,15 @@ export default function OnboardingLedgerScreen() {
           className="text-center"
           style={{ color: c.text, fontSize: 22, fontWeight: '700' }}
         >
-          สร้างสมุดบัญชีแรก
+          {t('onboarding.title', { defaultValue: 'Create your first ledger' })}
         </Text>
         <Text
           className="text-center"
           style={{ color: c.textSecondary, fontSize: 13 }}
         >
-          สมุดคือกล่องเก็บรายการรายรับ-รายจ่ายของคุณ {'\n'}สร้างได้หลายเล่ม เช่น
-          ส่วนตัว, ครอบครัว, ทริป ฯลฯ
+          {t('onboarding.subtitle', {
+            defaultValue: 'A ledger keeps your income and expenses. Create more than one for personal, family, trips, and more.',
+          })}
         </Text>
 
         {/* Name */}
@@ -123,12 +126,12 @@ export default function OnboardingLedgerScreen() {
           <Text
             style={{ color: c.textSecondary, fontSize: 11, marginBottom: 6 }}
           >
-            ชื่อสมุด
+            {t('ledgers.ledgerName')}
           </Text>
           <TextInput
             value={name}
             onChangeText={setName}
-            placeholder="เช่น สมุดของฉัน, ทริปเชียงใหม่"
+            placeholder={t('ledgers.ledgerNamePlaceholder')}
             placeholderTextColor={c.textMuted}
             className="px-3 py-2.5 rounded-xl"
             style={{
@@ -147,7 +150,7 @@ export default function OnboardingLedgerScreen() {
           <Text
             style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
-            ไอคอน
+            {t('ledgers.icon')}
           </Text>
           <View className="flex-row flex-wrap gap-2">
             {ICON_PRESETS.map((e) => {
@@ -182,7 +185,7 @@ export default function OnboardingLedgerScreen() {
           <Text
             style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
-            สี
+            {t('ledgers.color')}
           </Text>
           <View className="flex-row flex-wrap gap-3">
             {COLOR_PRESETS.map((preset) => {
@@ -213,7 +216,7 @@ export default function OnboardingLedgerScreen() {
           <Text
             style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}
           >
-            สกุลเงิน
+            {t('trips.currencyLabel')}
           </Text>
           <View className="flex-row gap-2">
             {CURRENCY_PRESETS.map((cur) => {
@@ -273,7 +276,7 @@ export default function OnboardingLedgerScreen() {
             <Text
               style={{ color: '#FFFFFF', fontSize: 16, fontWeight: '700' }}
             >
-              สร้างสมุดบัญชี
+              {t('dashboard.createLedger').replace(/^\+\s*/, '')}
             </Text>
           )}
         </Pressable>

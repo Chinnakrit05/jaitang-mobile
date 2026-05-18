@@ -8,6 +8,7 @@ import { StatusBar } from 'expo-status-bar';
 
 import { AuthProvider } from '../providers/AuthProvider';
 import { ActiveLedgerProvider } from '../providers/ActiveLedgerProvider';
+import { ActiveTripProvider } from '../providers/ActiveTripProvider';
 import { QueryProvider } from '../providers/QueryProvider';
 import { SyncProvider } from '../providers/SyncProvider';
 import { ThemeProvider } from '../providers/ThemeProvider';
@@ -27,10 +28,20 @@ export default function RootLayout() {
             <AuthProvider>
               <ActiveLedgerProvider>
                 <SyncProvider>
-                  <IconStyleProvider>
-                    <StatusBar style="auto" />
-                    <Stack screenOptions={{ headerShown: false }} />
-                  </IconStyleProvider>
+                  <ActiveTripProvider>
+                    <IconStyleProvider>
+                      <StatusBar style="auto" />
+                      <Stack
+                        screenOptions={{
+                          headerShown: false,
+                          animation: 'slide_from_right',
+                          animationDuration: 260,
+                          gestureEnabled: true,
+                          fullScreenGestureEnabled: true,
+                        }}
+                      />
+                    </IconStyleProvider>
+                  </ActiveTripProvider>
                 </SyncProvider>
               </ActiveLedgerProvider>
             </AuthProvider>

@@ -1,6 +1,14 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useTranslation } from 'react-i18next';
+import Animated, {
+  FadeInDown,
+  Easing,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from 'react-native-reanimated';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
@@ -25,30 +33,11 @@ import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
  *      active period + a sentence calling out the heaviest day.
  *
  * All numbers below the comparison banner are computed from real local
- * transactions; the chart bars are pure RN <View>s with computed
- * `width` so we don't need another SVG dep.
+ * transactions; the chart bars are animated RN views, so we don't need
+ * another chart dependency.
  */
 
 type Period = 'week' | 'month' | 'year';
-
-const PERIOD_LABELS: Record<Period, string> = {
-  week: 'สัปดาห์',
-  month: 'เดือน',
-  year: 'ปี',
-};
-
-const THAI_MONTHS = [
-  'มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน',
-  'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม',
-  'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม',
-];
-
-// Weekday labels in Mon-first order, matching the mockup.
-const WEEKDAY_LABELS = ['จ', 'อ', 'พ', 'พฤ', 'ศ', 'ส', 'อา'];
-const WEEKDAY_FULL_NAMES = [
-  'วันจันทร์', 'วันอังคาร', 'วันพุธ', 'วันพฤหัสบดี',
-  'วันศุกร์', 'วันเสาร์', 'วันอาทิตย์',
-];
 
 // Donut category palette — fixed across themes (semantic per category).
 const CATEGORY_PALETTE = [
@@ -65,7 +54,7 @@ function mondayFirst(day: number): number {
   return (day + 6) % 7;
 }
 
-function getPeriodRange(period: Period): {
+function getPeriodRange(period: Period, locale: string): {
   from: Date;
   to: Date;
   prevFrom: Date;
@@ -87,7 +76,13 @@ function getPeriodRange(period: Period): {
       to: nextMonday,
       prevFrom: prevMonday,
       prevTo: monday,
-      label: `สัปดาห์นี้`,
+      label: `${new Intl.DateTimeFormat(locale, {
+        month: 'short',
+        day: 'numeric',
+      }).format(monday)} - ${new Intl.DateTimeFormat(locale, {
+        month: 'short',
+        day: 'numeric',
+      }).format(new Date(nextMonday.getTime() - 1))}`,
     };
   }
   if (period === 'month') {
@@ -99,7 +94,10 @@ function getPeriodRange(period: Period): {
       to,
       prevFrom,
       prevTo: from,
-      label: `${THAI_MONTHS[now.getMonth()]} ${now.getFullYear() + 543}`,
+      label: new Intl.DateTimeFormat(locale, {
+        month: 'long',
+        year: 'numeric',
+      }).format(now),
     };
   }
   // year
@@ -111,7 +109,7 @@ function getPeriodRange(period: Period): {
     to,
     prevFrom,
     prevTo: from,
-    label: `ปี ${now.getFullYear() + 543}`,
+    label: new Intl.DateTimeFormat(locale, { year: 'numeric' }).format(now),
   };
 }
 
@@ -119,8 +117,15 @@ function formatTHB(n: number) {
   return Math.round(Math.abs(n)).toLocaleString('en-US');
 }
 
+function formatPct(value: number, total: number) {
+  if (total <= 0) return '0%';
+  return `${Math.round((value / total) * 100)}%`;
+}
+
 export default function InsightsScreen() {
+  const { t, i18n } = useTranslation();
   const c = useTheme().colors;
+  const locale = i18n.resolvedLanguage ?? i18n.language;
   const { ledger, loading: ledgerLoading } = useActiveLedger();
   // 2000 row limit covers a year of pretty heavy logging — bigger than
   // the dashboard's 500 because year view needs the full slice.
@@ -128,7 +133,28 @@ export default function InsightsScreen() {
   const cats = useCategories(ledger?.id);
   const [period, setPeriod] = useState<Period>('month');
 
-  const range = useMemo(() => getPeriodRange(period), [period]);
+  const range = useMemo(() => getPeriodRange(period, locale), [period, locale]);
+  const periodLabels: Record<Period, string> = {
+    week: t('navbarStat.periods.week'),
+    month: t('navbarStat.periods.month'),
+    year: t('navbarStat.periods.year'),
+  };
+  const weekdayLabels = useMemo(() => {
+    const monday = new Date(2024, 0, 1);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d);
+    });
+  }, [locale]);
+  const weekdayFullNames = useMemo(() => {
+    const monday = new Date(2024, 0, 1);
+    return Array.from({ length: 7 }, (_, i) => {
+      const d = new Date(monday);
+      d.setDate(monday.getDate() + i);
+      return new Intl.DateTimeFormat(locale, { weekday: 'long' }).format(d);
+    });
+  }, [locale]);
 
   const periodTxs = useMemo(() => {
     const fromIso = range.from.toISOString();
@@ -193,18 +219,22 @@ export default function InsightsScreen() {
         const cat = catById.get(cid ?? '');
         return {
           id: cid,
-          name: cat?.name ?? 'อื่นๆ',
+          name: cat?.name ?? t('common.uncategorized'),
           icon: cat?.icon ?? null,
           value,
+          pct: 0,
         };
       })
       .sort((a, b) => b.value - a.value);
+    rows.forEach((row) => {
+      row.pct = periodExpense > 0 ? Math.round((row.value / periodExpense) * 100) : 0;
+    });
     const slices: DonutSlice[] = rows.map((r, i) => ({
       value: r.value,
       color: CATEGORY_PALETTE[i % CATEGORY_PALETTE.length],
     }));
     return { rows, slices };
-  }, [periodTxs, catById]);
+  }, [periodTxs, catById, periodExpense, t]);
 
   // Sum expenses per weekday (Mon=0..Sun=6).
   const weekdayTotals = useMemo(() => {
@@ -222,25 +252,26 @@ export default function InsightsScreen() {
     (best, v, i) => (v > weekdayTotals[best] ? i : best),
     0,
   );
-  const heaviestDay = WEEKDAY_FULL_NAMES[heaviestIdx];
+  const heaviestDay = weekdayFullNames[heaviestIdx];
   const hasAnyData = periodExpense > 0;
+  const topCategory = breakdown.rows[0] ?? null;
 
   const comparisonText =
     pctChange === null
-      ? 'ยังไม่มีข้อมูลเดือนก่อนเทียบ — เริ่มจดเลย!'
+      ? t('insights.noBaseline', { defaultValue: 'No previous period yet — start tracking!' })
       : pctChange < 0
-        ? `เดือนนี้ใช้น้อยลง ${Math.abs(pctChange)}% จากเดือนที่แล้ว 🎉`
+        ? t('insights.spendingDown', { defaultValue: 'Spending is down {pct}% from last period 🎉', pct: Math.abs(pctChange) })
         : pctChange > 0
-          ? `เดือนนี้ใช้มากขึ้น ${pctChange}% จากเดือนที่แล้ว 💸`
-          : 'เดือนนี้ใช้พอ ๆ กับเดือนที่แล้ว';
+          ? t('insights.spendingUp', { defaultValue: 'Spending is up {pct}% from last period 💸', pct: pctChange })
+          : t('insights.spendingFlat', { defaultValue: 'Spending is about the same as last period' });
   const comparisonCheer =
     pctChange === null
       ? ''
       : pctChange < 0
-        ? 'เก่งมากเลย!'
+        ? t('insights.cheerDown', { defaultValue: 'Nice work!' })
         : pctChange > 0
-          ? 'ระวังนิดนะ ดูหมวดไหนเพิ่มเยอะ'
-          : 'รักษาระดับนี้ไว้';
+          ? t('insights.cheerUp', { defaultValue: 'Careful — check which categories moved up' })
+          : t('insights.cheerFlat', { defaultValue: 'Keep it steady' });
 
   if (ledgerLoading || txs.isLoading) {
     return (
@@ -258,7 +289,7 @@ export default function InsightsScreen() {
         className="flex-1 items-center justify-center"
         style={{ backgroundColor: c.bg }}
       >
-        <Text style={{ color: c.textSecondary }}>ยังไม่มีสมุดบัญชี</Text>
+        <Text style={{ color: c.textSecondary }}>{t('dashboard.noLedgerTitle')}</Text>
       </SafeAreaView>
     );
   }
@@ -275,7 +306,7 @@ export default function InsightsScreen() {
         {/* 1. Header */}
         <View>
           <Text style={{ color: c.text, fontSize: 22, fontWeight: '700' }}>
-            รายงานเดือนนี้
+            {t('insights.title')}
           </Text>
           <Text style={{ color: c.textSecondary, fontSize: 13, marginTop: 2 }}>
             {range.label}
@@ -283,7 +314,8 @@ export default function InsightsScreen() {
         </View>
 
         {/* 2. Comparison banner */}
-        <View
+        <Animated.View
+          entering={FadeInDown.duration(420).delay(80)}
           className="rounded-2xl p-4 flex-row items-center gap-3"
           style={{ backgroundColor: c.cardElevated }}
         >
@@ -305,14 +337,18 @@ export default function InsightsScreen() {
               </Text>
             ) : null}
           </View>
-        </View>
+        </Animated.View>
 
         {/* 3. Spend card */}
-        <View className="rounded-2xl p-4" style={{ backgroundColor: c.card }}>
+        <Animated.View
+          entering={FadeInDown.duration(420).delay(140)}
+          className="rounded-2xl p-4"
+          style={{ backgroundColor: c.card }}
+        >
           {/* Header row: title + period toggle */}
           <View className="flex-row items-center justify-between mb-3">
             <Text style={{ color: c.text, fontSize: 15, fontWeight: '600' }}>
-              จ่ายไปทั้งหมด
+              {t('insights.expenseLabel')}
             </Text>
             <View
               className="flex-row p-1 rounded-xl"
@@ -338,7 +374,7 @@ export default function InsightsScreen() {
                         fontWeight: active ? '700' : '500',
                       }}
                     >
-                      {PERIOD_LABELS[p]}
+                      {periodLabels[p]}
                     </Text>
                   </Pressable>
                 );
@@ -355,10 +391,27 @@ export default function InsightsScreen() {
               trackColor={c.chip}
               labelColor={c.textMuted}
               centerColor={c.text}
-              label="จ่ายไป"
+              label={t('dashboard.donutSpent')}
               centerValue={hasAnyData ? `฿${formatTHB(periodExpense)}` : '—'}
             />
           </View>
+
+          {topCategory ? (
+            <View
+              className="rounded-2xl px-3 py-2.5 flex-row items-center justify-between"
+              style={{ backgroundColor: c.bg }}
+            >
+              <Text style={{ color: c.textSecondary, fontSize: 12 }}>
+                {t('insights.topCategory', { defaultValue: 'Top category' })}
+              </Text>
+              <Text
+                numberOfLines={1}
+                style={{ color: c.text, fontSize: 12, fontWeight: '700', maxWidth: '62%' }}
+              >
+                {topCategory.name} · {formatPct(topCategory.value, periodExpense)}
+              </Text>
+            </View>
+          ) : null}
 
           {/* Top-4 categories grid (2 cols × 2 rows) */}
           {breakdown.rows.length === 0 ? (
@@ -366,7 +419,7 @@ export default function InsightsScreen() {
               className="text-center mt-3"
               style={{ color: c.textSecondary, fontSize: 13 }}
             >
-              ยังไม่มีรายจ่ายในช่วงนี้
+              {t('insights.noPeriodExpense', { defaultValue: 'No expenses in this period' })}
             </Text>
           ) : (
             <View
@@ -417,7 +470,7 @@ export default function InsightsScreen() {
                           fontWeight: '500',
                         }}
                       >
-                        ฿{formatTHB(r.value)}
+                        ฿{formatTHB(r.value)} · {formatPct(r.value, periodExpense)}
                       </Text>
                     </View>
                   </View>
@@ -425,7 +478,7 @@ export default function InsightsScreen() {
               ))}
             </View>
           )}
-        </View>
+        </Animated.View>
 
         {/* 4. Payment-method split — cash vs transfer of this period's
             expenses. Hidden entirely when there's nothing spent yet so
@@ -434,19 +487,22 @@ export default function InsightsScreen() {
           <View>
             <View className="flex-row items-center justify-between mb-3">
               <Text style={{ color: c.text, fontSize: 15, fontWeight: '600' }}>
-                ช่องทางการจ่าย
+                {t('dashboard.paymentMethodTitle')}
               </Text>
               {paymentSplit.unknown > 0 && (
                 <Text style={{ color: c.textMuted, fontSize: 11 }}>
-                  ไม่ระบุ ฿{formatTHB(paymentSplit.unknown)}
+                  {t('dashboard.paymentMethodUnspecified')} ฿{formatTHB(paymentSplit.unknown)}
                 </Text>
               )}
             </View>
-            <View className="flex-row gap-3">
+            <Animated.View
+              entering={FadeInDown.duration(420).delay(220)}
+              className="flex-row gap-3"
+            >
               <PaymentMethodCard
                 colors={c}
                 emoji="💵"
-                label="เงินสด"
+                label={t('quick.cash')}
                 amount={paymentSplit.cash}
                 pct={
                   paymentSplit.total > 0
@@ -457,7 +513,7 @@ export default function InsightsScreen() {
               <PaymentMethodCard
                 colors={c}
                 emoji="🏦"
-                label="โอน"
+                label={t('quick.transfer')}
                 amount={paymentSplit.transfer}
                 pct={
                   paymentSplit.total > 0
@@ -467,7 +523,7 @@ export default function InsightsScreen() {
                     : 0
                 }
               />
-            </View>
+            </Animated.View>
           </View>
         )}
 
@@ -490,26 +546,30 @@ export default function InsightsScreen() {
           </View>
           <View className="flex-1">
             <Text style={{ color: c.textSecondary, fontSize: 11 }}>
-              บันทึกต่อเนื่อง
+              {t('insights.streakTitle', { defaultValue: 'Logging streak' })}
             </Text>
             <Text
               style={{ color: c.text, fontSize: 16, fontWeight: '700' }}
             >
-              12 วันติด!
+              {t('insights.streakDays', { defaultValue: '{count} days in a row!', count: 12 })}
             </Text>
           </View>
           <View className="items-end">
             <Text style={{ color: c.textSecondary, fontSize: 11 }}>
-              อีก 18 วัน
+              {t('insights.daysToGoal', { defaultValue: '{count} days left', count: 18 })}
             </Text>
             <Text style={{ color: c.accent, fontSize: 12, fontWeight: '700' }}>
-              ครบเดือน 🏆
+              {t('insights.monthGoal', { defaultValue: 'Full month 🏆' })}
             </Text>
           </View>
         </View>
 
         {/* 5. Weekday usage chart */}
-        <View className="rounded-2xl p-4" style={{ backgroundColor: c.card }}>
+        <Animated.View
+          entering={FadeInDown.duration(420).delay(300)}
+          className="rounded-2xl p-4"
+          style={{ backgroundColor: c.card }}
+        >
           <Text
             style={{
               color: c.text,
@@ -518,13 +578,13 @@ export default function InsightsScreen() {
               marginBottom: 12,
             }}
           >
-            วันไหนใช้เยอะ
+            {t('insights.weekdayHeading', { defaultValue: 'Heaviest spending days' })}
           </Text>
           <View
             className="flex-row items-end justify-around"
             style={{ height: 100, gap: 6 }}
           >
-            {WEEKDAY_LABELS.map((label, i) => {
+            {weekdayLabels.map((label, i) => {
               const value = weekdayTotals[i];
               const heightPx = Math.max(4, (value / maxWeekday) * 80);
               const isHeaviest = hasAnyData && i === heaviestIdx;
@@ -533,13 +593,9 @@ export default function InsightsScreen() {
                   <View
                     className="flex-1 justify-end items-center w-full"
                   >
-                    <View
-                      style={{
-                        width: '70%',
-                        height: heightPx,
-                        backgroundColor: isHeaviest ? c.accent : c.chip,
-                        borderRadius: 8,
-                      }}
+                    <AnimatedWeekdayBar
+                      color={isHeaviest ? c.accent : c.chip}
+                      height={heightPx}
                     />
                   </View>
                   <Text
@@ -552,6 +608,17 @@ export default function InsightsScreen() {
                   >
                     {label}
                   </Text>
+                  <Text
+                    numberOfLines={1}
+                    style={{
+                      color: isHeaviest ? c.text : c.textMuted,
+                      fontSize: 9,
+                      fontWeight: isHeaviest ? '700' : '500',
+                      marginTop: 2,
+                    }}
+                  >
+                    ฿{formatTHB(value)}
+                  </Text>
                 </View>
               );
             })}
@@ -561,7 +628,7 @@ export default function InsightsScreen() {
               className="text-center mt-3"
               style={{ color: c.text, fontSize: 13, fontWeight: '500' }}
             >
-              {heaviestDay}ใช้มากที่สุด{' '}
+              {t('insights.heaviestDay', { defaultValue: '{day} is the heaviest ', day: heaviestDay })}
               {heaviestIdx === 4 ? '🍻' : heaviestIdx >= 5 ? '🛍' : '☕'}
             </Text>
           ) : (
@@ -569,10 +636,10 @@ export default function InsightsScreen() {
               className="text-center mt-3"
               style={{ color: c.textSecondary, fontSize: 12 }}
             >
-              ยังไม่มีรายการในช่วงนี้
+              {t('transactions.emptyTitle')}
             </Text>
           )}
-        </View>
+        </Animated.View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -596,6 +663,7 @@ function PaymentMethodCard({
   amount: number;
   pct: number;
 }) {
+  const { t } = useTranslation();
   return (
     <View
       className="flex-1 rounded-2xl p-4"
@@ -614,17 +682,56 @@ function PaymentMethodCard({
         className="h-1.5 rounded-full"
         style={{ backgroundColor: colors.bg, overflow: 'hidden' }}
       >
-        <View
-          className="h-1.5 rounded-full"
-          style={{
-            backgroundColor: colors.accent,
-            width: `${pct}%`,
-          }}
-        />
+        <AnimatedProgressBar color={colors.accent} pct={pct} />
       </View>
       <Text style={{ color: colors.textMuted, fontSize: 11 }}>
-        {pct}% ของยอดจ่าย
+        {t('insights.shareOfExpense', { defaultValue: '{pct}% of spending', pct })}
       </Text>
     </View>
+  );
+}
+
+function AnimatedProgressBar({ color, pct }: { color: string; pct: number }) {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(Math.max(0, Math.min(100, pct)), {
+      duration: 700,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [pct, progress]);
+  const style = useAnimatedStyle(() => ({
+    width: `${progress.value}%`,
+  }));
+  return (
+    <Animated.View
+      className="h-1.5 rounded-full"
+      style={[{ backgroundColor: color }, style]}
+    />
+  );
+}
+
+function AnimatedWeekdayBar({ color, height }: { color: string; height: number }) {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = 0;
+    progress.value = withTiming(height, {
+      duration: 680,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [height, progress]);
+  const style = useAnimatedStyle(() => ({
+    height: progress.value,
+  }));
+  return (
+    <Animated.View
+      style={[
+        {
+          width: '70%',
+          backgroundColor: color,
+          borderRadius: 8,
+        },
+        style,
+      ]}
+    />
   );
 }

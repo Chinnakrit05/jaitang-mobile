@@ -11,6 +11,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
@@ -46,11 +47,6 @@ const ICON_PRESETS = [
   '🏷️', '🍜', '☕', '🚕', '🛍', '💊', '🎬', '🧾',
   '🏠', '✈️', '💰', '🎁', '📚', '⛽', '💄', '🎮',
 ];
-
-const HIDDEN_KIND_LABEL: Record<'expense' | 'income', string> = {
-  expense: 'รายจ่าย',
-  income: 'รายรับ',
-};
 
 function ChevronLeftIcon({ color, size }: { color: string; size: number }) {
   return (
@@ -88,6 +84,7 @@ type FormState = {
 };
 
 export default function CategoriesScreen() {
+  const { t } = useTranslation();
   const c = useTheme().colors;
   const { ledger, loading: ledgerLoading } = useActiveLedger();
   const cats = useCategories(ledger?.id);
@@ -116,7 +113,7 @@ export default function CategoriesScreen() {
       }
     }
     roots.sort((a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name));
-    const out: Array<{ cat: Category; level: 0 | 1 }> = [];
+    const out: { cat: Category; level: 0 | 1 }[] = [];
     for (const root of roots) {
       out.push({ cat: root, level: 0 });
       const subs = (subsByParent.get(root.id) ?? []).sort(
@@ -177,7 +174,7 @@ export default function CategoriesScreen() {
     if (!ledger || !form) return;
     const name = form.name.trim();
     if (!name) {
-      setError('ใส่ชื่อหมวดก่อน');
+      setError(t('categories.nameRequired', { defaultValue: 'Enter a category name first' }));
       return;
     }
     try {
@@ -218,12 +215,12 @@ export default function CategoriesScreen() {
 
   function confirmDelete(cat: Category) {
     Alert.alert(
-      `ลบ "${cat.name}"?`,
-      'รายการที่ใช้หมวดนี้จะกลายเป็น "ไม่ระบุหมวด" (ไม่ถูกลบ)',
+      t('categories.deleteTitle', { defaultValue: 'Delete "{name}"?', name: cat.name }),
+      t('categories.deleteConfirm'),
       [
-        { text: 'ยกเลิก', style: 'cancel' },
+        { text: t('common.cancel'), style: 'cancel' },
         {
-          text: 'ลบ',
+          text: t('common.delete'),
           style: 'destructive',
           onPress: async () => {
             if (!ledger) return;
@@ -232,7 +229,7 @@ export default function CategoriesScreen() {
               if (form?.mode === 'edit' && form.id === cat.id) closeForm();
             } catch (e) {
               console.error('delete category failed:', e);
-              Alert.alert('ลบไม่สำเร็จ', extractErrorMessage(e));
+              Alert.alert(t('categories.deleteFailed', { defaultValue: 'Delete failed' }), extractErrorMessage(e));
             }
           },
         },
@@ -256,7 +253,7 @@ export default function CategoriesScreen() {
         className="flex-1 items-center justify-center"
         style={{ backgroundColor: c.bg }}
       >
-        <Text style={{ color: c.textSecondary }}>ยังไม่มีสมุดบัญชี</Text>
+        <Text style={{ color: c.textSecondary }}>{t('dashboard.noLedgerTitle')}</Text>
       </SafeAreaView>
     );
   }
@@ -284,7 +281,7 @@ export default function CategoriesScreen() {
             <ChevronLeftIcon color={c.text} size={20} />
           </Pressable>
           <Text style={{ color: c.text, fontSize: 18, fontWeight: '700' }}>
-            หมวดหมู่
+            {t('categories.title')}
           </Text>
           <Pressable
             onPress={form ? closeForm : openCreate}
@@ -335,7 +332,7 @@ export default function CategoriesScreen() {
                     fontWeight: active ? '700' : '500',
                   }}
                 >
-                  {HIDDEN_KIND_LABEL[k]}
+                  {k === 'expense' ? t('common.expense') : t('common.income')}
                 </Text>
               </Pressable>
             );
@@ -349,19 +346,21 @@ export default function CategoriesScreen() {
             style={{ backgroundColor: c.card, gap: 12 }}
           >
             <Text style={{ color: c.text, fontSize: 14, fontWeight: '700' }}>
-              {form.mode === 'create' ? 'หมวดใหม่' : 'แก้ไขหมวด'}
+              {form.mode === 'create' ? t('categories.newTitle', { defaultValue: 'New category' }) : t('categories.editTitle', { defaultValue: 'Edit category' })}
             </Text>
 
             {/* Name */}
             <View>
               <Text style={{ color: c.textSecondary, fontSize: 11, marginBottom: 6 }}>
-                ชื่อหมวด
+                {t('categories.nameLabel', { defaultValue: 'Category name' })}
               </Text>
               <TextInput
                 value={form.name}
                 onChangeText={(v) => setForm({ ...form, name: v })}
                 placeholder={
-                  kind === 'expense' ? 'เช่น ค่ากาแฟ' : 'เช่น เงินเดือนพิเศษ'
+                  kind === 'expense'
+                    ? t('categories.expensePlaceholder')
+                    : t('categories.incomePlaceholder')
                 }
                 placeholderTextColor={c.textMuted}
                 style={{
@@ -378,7 +377,7 @@ export default function CategoriesScreen() {
             {/* Icon picker */}
             <View>
               <Text style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}>
-                ไอคอน
+                {t('trips.iconLabel')}
               </Text>
               <View className="flex-row flex-wrap gap-2">
                 {ICON_PRESETS.map((emoji) => {
@@ -406,11 +405,11 @@ export default function CategoriesScreen() {
             {/* Parent picker */}
             <View>
               <Text style={{ color: c.textSecondary, fontSize: 11, marginBottom: 8 }}>
-                ประเภท
+                {t('common.category')}
               </Text>
               <View className="flex-row flex-wrap gap-2">
                 <ParentChip
-                  label="⭐ หมวดหลัก"
+                  label={t('categories.parentRoot', { defaultValue: '⭐ Top-level category' })}
                   active={form.parentId === null}
                   onPress={() => setForm({ ...form, parentId: null })}
                   colors={c}
@@ -418,7 +417,7 @@ export default function CategoriesScreen() {
                 {parentOptions.map((p) => (
                   <ParentChip
                     key={p.id}
-                    label={`↳ อยู่ใต้ ${p.icon ?? '🏷️'} ${p.name}`}
+                    label={t('categories.parentUnder', { defaultValue: '↳ Under {icon} {name}', icon: p.icon ?? '🏷️', name: p.name })}
                     active={form.parentId === p.id}
                     onPress={() => setForm({ ...form, parentId: p.id })}
                     colors={c}
@@ -429,7 +428,7 @@ export default function CategoriesScreen() {
                 <Text
                   style={{ color: c.textMuted, fontSize: 11, marginTop: 6 }}
                 >
-                  💡 ยังไม่มีหมวดหลักให้ใช้เป็น parent — สร้างหมวดนี้เป็นหมวดหลักก่อน
+                  💡 {t('categories.noParentHint', { defaultValue: 'No top-level category is available yet — create this as a top-level category first' })}
                 </Text>
               )}
             </View>
@@ -446,7 +445,7 @@ export default function CategoriesScreen() {
                 style={{ backgroundColor: c.chip }}
               >
                 <Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>
-                  ยกเลิก
+                  {t('common.cancel')}
                 </Text>
               </Pressable>
               <Pressable
@@ -468,7 +467,7 @@ export default function CategoriesScreen() {
                       fontWeight: '700',
                     }}
                   >
-                    {form.mode === 'create' ? 'เพิ่ม' : 'บันทึก'}
+                    {form.mode === 'create' ? t('categories.addButton') : t('common.save')}
                   </Text>
                 )}
               </Pressable>
@@ -492,7 +491,7 @@ export default function CategoriesScreen() {
                     marginTop: 8,
                   }}
                 >
-                  กำลังเตรียมหมวดมาตรฐาน...
+                  {t('categories.seeding', { defaultValue: 'Preparing default categories...' })}
                 </Text>
               </>
             ) : (
@@ -506,7 +505,10 @@ export default function CategoriesScreen() {
                     fontWeight: '500',
                   }}
                 >
-                  ยังไม่มีหมวด{HIDDEN_KIND_LABEL[kind]}
+                  {t('categories.emptyKind', {
+                    defaultValue: 'No {kind} categories yet',
+                    kind: kind === 'expense' ? t('common.expense') : t('common.income'),
+                  })}
                 </Text>
                 <Text
                   style={{
@@ -516,7 +518,7 @@ export default function CategoriesScreen() {
                     textAlign: 'center',
                   }}
                 >
-                  กด + ด้านบนเพื่อสร้างหมวดแรก
+                  {t('categories.emptyHint')}
                 </Text>
               </>
             )}
@@ -573,7 +575,7 @@ export default function CategoriesScreen() {
                     ).length;
                     return subCount > 0 ? (
                       <Text style={{ color: c.textMuted, fontSize: 11, marginTop: 1 }}>
-                        {subCount} หมวดย่อย
+                        {t('categories.subcategoryCount', { defaultValue: '{count} subcategories', count: subCount })}
                       </Text>
                     ) : null;
                   })()}
@@ -592,7 +594,7 @@ export default function CategoriesScreen() {
             marginTop: 4,
           }}
         >
-          💡 กดที่แถวเพื่อแก้ไข · กดค้างเพื่อลบ
+          💡 {t('categories.rowHint', { defaultValue: 'Tap a row to edit · long-press to delete' })}
         </Text>
       </ScrollView>
     </SafeAreaView>

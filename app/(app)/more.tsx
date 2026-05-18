@@ -2,6 +2,7 @@ import { Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
+import { useTranslation } from 'react-i18next';
 
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
@@ -46,49 +47,70 @@ function ChevronRightIcon({ color, size }: { color: string; size: number }) {
 }
 
 export default function MoreScreen() {
+  const { t } = useTranslation();
   const c = useTheme().colors;
   const { session } = useAuth();
   const { ledger } = useActiveLedger();
 
   function confirmSignOut() {
-    Alert.alert('ออกจากระบบ?', 'ข้อมูลที่ยังไม่ sync จะคงอยู่ในเครื่อง', [
-      { text: 'ยกเลิก', style: 'cancel' },
-      {
-        text: 'ออกจากระบบ',
-        style: 'destructive',
-        onPress: () => {
-          signOut().catch((e) => {
-            console.error('signOut failed:', e);
-            Alert.alert('ออกไม่สำเร็จ', String(e?.message ?? e));
-          });
+    Alert.alert(
+      t('common.logoutFull'),
+      t('more.signOutHint', {
+        defaultValue: 'Unsynced local data will stay on this device.',
+      }),
+      [
+        { text: t('common.cancel'), style: 'cancel' },
+        {
+          text: t('common.logoutFull'),
+          style: 'destructive',
+          onPress: () => {
+            signOut().catch((e) => {
+              console.error('signOut failed:', e);
+              Alert.alert(
+                t('more.signOutFailed', { defaultValue: 'Sign out failed' }),
+                String(e?.message ?? e),
+              );
+            });
+          },
         },
-      },
-    ]);
+      ],
+    );
   }
 
   const general: RowSpec[] = [
     {
       icon: 'categories',
-      label: 'หมวดหมู่',
-      hint: 'จัดการหมวดรายรับ / รายจ่าย',
+      label: t('nav.categories'),
+      hint: t('categories.subtitle'),
       href: '/(app)/categories',
     },
     {
       icon: 'recurring',
-      label: 'รายการประจำ',
-      hint: 'บิล / subscription ที่เกิดซ้ำ',
+      label: t('nav.recurring'),
+      hint: t('recurring.subtitle'),
       href: '/(app)/recurring',
     },
     {
+      icon: 'trips',
+      label: t('nav.trips'),
+      hint: t('trips.subtitle'),
+      href: '/(app)/trips',
+    },
+    {
       icon: 'ledgers',
-      label: 'สมุดบัญชี',
-      hint: ledger ? `กำลังใช้ ${ledger.name}` : 'สลับ / สร้างสมุดใหม่',
+      label: t('nav.ledgers'),
+      hint: ledger
+        ? t('more.activeLedger', {
+            defaultValue: 'Using {name}',
+            name: ledger.name,
+          })
+        : t('ledgers.subtitle'),
       href: '/(app)/ledgers',
     },
     {
       icon: 'settings',
-      label: 'ตั้งค่า',
-      hint: 'ธีม · ภาษา · สไตล์ไอคอน',
+      label: t('nav.settings'),
+      hint: t('settings.languageHint'),
       href: '/(app)/settings',
     },
   ];
@@ -96,7 +118,7 @@ export default function MoreScreen() {
   const account: RowSpec[] = [
     {
       icon: 'logout',
-      label: 'ออกจากระบบ',
+      label: t('common.logoutFull'),
       onPress: confirmSignOut,
       destructive: true,
     },
@@ -111,7 +133,7 @@ export default function MoreScreen() {
       <ScrollView contentContainerStyle={{ padding: 16, paddingBottom: 96, gap: 16 }}>
         {/* Header */}
         <Text style={{ color: c.text, fontSize: 22, fontWeight: '700' }}>
-          เพิ่มเติม
+          {t('nav.more')}
         </Text>
 
         {/* User card */}
@@ -137,14 +159,19 @@ export default function MoreScreen() {
               style={{ color: c.textSecondary, fontSize: 11, marginTop: 2 }}
               numberOfLines={1}
             >
-              {ledger ? `📒 ${ledger.name} · ${ledger.currency}` : 'ยังไม่มีสมุด'}
+              {ledger
+                ? `📒 ${ledger.name} · ${ledger.currency}`
+                : t('more.noLedger', { defaultValue: 'No ledger yet' })}
             </Text>
           </View>
           <ChevronRightIcon color={c.textMuted} size={18} />
         </Pressable>
 
         {/* General section */}
-        <Section title="ทั่วไป" colors={c}>
+        <Section
+          title={t('more.generalSection', { defaultValue: 'General' })}
+          colors={c}
+        >
           {general.map((row, i) => (
             <Row
               key={row.label}
@@ -156,7 +183,7 @@ export default function MoreScreen() {
         </Section>
 
         {/* Account section */}
-        <Section title="บัญชี" colors={c}>
+        <Section title={t('settings.accountSection')} colors={c}>
           {account.map((row, i) => (
             <Row
               key={row.label}
