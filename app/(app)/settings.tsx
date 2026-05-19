@@ -6,6 +6,13 @@ import { router } from 'expo-router';
 import { useAuth } from '../../providers/AuthProvider';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
+import {
+  PALETTE_META,
+  PALETTE_ORDER,
+  PALETTES,
+  type PaletteId,
+} from '../../lib/theme/colors';
+import { mascotFor } from '../../components/Mascot';
 import { signOut } from '../../lib/auth';
 import {
   useIconStyle,
@@ -33,7 +40,7 @@ export default function SettingsScreen() {
   const iconStyle = useIconStyle();
   const setIconStyle = useSetIconStyle();
   const { ledger } = useActiveLedger();
-  const { mode, setMode, oled, setOled, isDark } = useTheme();
+  const { mode, setMode, oled, setOled, isDark, palette, setPalette } = useTheme();
   const c = useTheme().colors;
   const locale = currentLocale();
 
@@ -109,6 +116,30 @@ export default function SettingsScreen() {
             colors={c}
             onPress={() => router.push('/(app)/onboarding-ledger')}
           />
+        </Section>
+
+        <Section title="ธีมสัตว์" icon="sparkles" colors={c}>
+          <View className="p-3">
+            <Text style={{ color: c.text, fontSize: 13, fontWeight: '700', marginBottom: 4 }}>
+              เลือกมาสคอตและสีของแอป
+            </Text>
+            <Text style={{ color: c.textSecondary, fontSize: 11, marginBottom: 10 }}>
+              เปลี่ยนทั้งโทนสีและรูปสัตว์น้อยบนหน้าหลัก
+            </Text>
+            <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
+              {PALETTE_ORDER.map((id) => (
+                <View key={id} style={{ width: '50%', padding: 4 }}>
+                  <PaletteCard
+                    id={id}
+                    selected={palette === id}
+                    isDark={isDark}
+                    onPress={() => setPalette(id)}
+                    activeColors={c}
+                  />
+                </View>
+              ))}
+            </View>
+          </View>
         </Section>
 
         <Section title={t('settings.themeSection')} icon="sun" colors={c}>
@@ -353,6 +384,122 @@ function ChoicePill({
       >
         {label}
       </Text>
+    </Pressable>
+  );
+}
+
+function PaletteCard({
+  id,
+  selected,
+  isDark,
+  onPress,
+  activeColors,
+}: {
+  id: PaletteId;
+  selected: boolean;
+  isDark: boolean;
+  onPress: () => void;
+  activeColors: Colors;
+}) {
+  const meta = PALETTE_META[id];
+  // Preview colors come from the palette's own light/dark variant, NOT
+  // the currently active theme — that way the card visually advertises
+  // what selecting it would do, regardless of which palette is on now.
+  const preview = isDark ? PALETTES[id].dark : PALETTES[id].light;
+  const Mascot = mascotFor(id);
+  return (
+    <Pressable
+      onPress={onPress}
+      style={{
+        borderRadius: 18,
+        padding: 12,
+        backgroundColor: preview.bg,
+        borderWidth: 2,
+        borderColor: selected ? activeColors.accent : 'transparent',
+        gap: 8,
+      }}
+    >
+      <View className="flex-row items-center gap-2">
+        <View
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 22,
+            backgroundColor: preview.cardElevated,
+            alignItems: 'center',
+            justifyContent: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          <Mascot size={38} />
+        </View>
+        <View className="flex-1 min-w-0">
+          <Text
+            numberOfLines={1}
+            style={{
+              color: preview.text,
+              fontSize: 14,
+              fontWeight: '800',
+            }}
+          >
+            {meta.label}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={{
+              color: preview.textSecondary,
+              fontSize: 10,
+              marginTop: 2,
+            }}
+          >
+            {meta.subtitle}
+          </Text>
+        </View>
+        {selected ? (
+          <View
+            style={{
+              width: 22,
+              height: 22,
+              borderRadius: 11,
+              backgroundColor: activeColors.accent,
+              alignItems: 'center',
+              justifyContent: 'center',
+            }}
+          >
+            <Text style={{ color: activeColors.accentText, fontSize: 12, fontWeight: '800' }}>
+              ✓
+            </Text>
+          </View>
+        ) : null}
+      </View>
+      <View className="flex-row gap-1.5">
+        <View
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: 7,
+            backgroundColor: preview.accent,
+          }}
+        />
+        <View
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: 7,
+            backgroundColor: preview.card,
+            borderWidth: 0.5,
+            borderColor: 'rgba(0,0,0,0.12)',
+          }}
+        />
+        <View
+          style={{
+            width: 14,
+            height: 14,
+            borderRadius: 7,
+            backgroundColor: preview.expense,
+          }}
+        />
+      </View>
     </Pressable>
   );
 }

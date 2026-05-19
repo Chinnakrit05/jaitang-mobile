@@ -9,32 +9,33 @@ import { Appearance } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import {
-  LIGHT,
-  DARK,
-  DARK_OLED,
+  PALETTES,
+  PALETTE_ORDER,
+  SHIBA_LIGHT,
   type ColorTokens,
+  type PaletteId,
 } from '../lib/theme/colors';
 
 /**
  * Theme provider — owns the active color palette for the whole app.
  *
- * Three knobs:
- *   - `mode` ∈ 'light' | 'dark' | 'system'
- *   - `oled` boolean — picks a pure-black palette inside dark mode
- *   - `isDark` computed — true when current effective mode is dark
+ * Three orthogonal knobs:
+ *   - `palette` ∈ 'shiba' | 'calico' | 'penguin' | 'blackcat' | 'samoyed'
+ *   - `mode`    ∈ 'light' | 'dark' | 'system'
+ *   - `oled`    boolean — picks a pure-black variant inside dark mode
  *
- * Both knobs persist in AsyncStorage (`jt-theme-mode` / `jt-theme-oled`).
- * System mode subscribes to `Appearance` so the app re-themes when the
- * OS toggles dark mode at sunset.
- *
- * Future accent colors + seasonal palettes will plug in here by adding
- * extra knobs that compose with mode.
+ * They compose to a single `ColorTokens` object that screens consume via
+ * `useTheme().colors`. Each knob persists in AsyncStorage under its own
+ * key (so a corrupted value for one doesn't lose the others). System
+ * mode subscribes to `Appearance` so the app re-themes when the OS
+ * toggles dark mode at sunset.
  */
 
 export type Mode = 'light' | 'dark' | 'system';
 
 const MODE_KEY = 'jt-theme-mode';
 const OLED_KEY = 'jt-theme-oled';
+const PALETTE_KEY = 'jt-theme-palette';
 
 type ThemeCtx = {
   colors: ColorTokens;
@@ -42,28 +43,36 @@ type ThemeCtx = {
   setMode: (m: Mode) => void;
   oled: boolean;
   setOled: (b: boolean) => void;
+  palette: PaletteId;
+  setPalette: (p: PaletteId) => void;
   isDark: boolean;
 };
 
 const Ctx = createContext<ThemeCtx>({
-  colors: LIGHT,
+  colors: SHIBA_LIGHT,
   mode: 'system',
   setMode: () => {},
   oled: false,
   setOled: () => {},
+  palette: 'shiba',
+  setPalette: () => {},
   isDark: false,
 });
+
+function isPaletteId(v: unknown): v is PaletteId {
+  return typeof v === 'string' && (PALETTE_ORDER as string[]).includes(v);
+}
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
   const [mode, setModeState] = useState<Mode>('system');
   const [oled, setOledState] = useState(false);
+  const [palette, setPaletteState] = useState<PaletteId>('shiba');
   const [systemDark, setSystemDark] = useState(
     Appearance.getColorScheme() === 'dark',
   );
 
-  // Hydrate persisted prefs once on mount. Done in two queries instead
-  // of one composite read so a corrupted value for one key doesn't lose
-  // the other.
+  // Hydrate persisted prefs once on mount. Done in independent reads so
+  // a corrupted value for one key doesn't blow away the others.
   useEffect(() => {
     AsyncStorage.getItem(MODE_KEY)
       .then((v) => {
@@ -75,10 +84,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         if (v === 'true') setOledState(true);
       })
       .catch(() => {});
+    AsyncStorage.getItem(PALETTE_KEY)
+      .then((v) => {
+        if (isPaletteId(v)) setPaletteState(v);
+      })
+      .catch(() => {});
   }, []);
 
-  // Track system color scheme — only meaningful when `mode === 'system'`,
-  // but it's cheap to keep up-to-date regardless.
   useEffect(() => {
     const sub = Appearance.addChangeListener(({ colorScheme }) => {
       setSystemDark(colorScheme === 'dark');
@@ -94,13 +106,27 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setOledState(b);
     AsyncStorage.setItem(OLED_KEY, b ? 'true' : 'false').catch(() => {});
   }
+  function setPalette(p: PaletteId) {
+    setPaletteState(p);
+    AsyncStorage.setItem(PALETTE_KEY, p).catch(() => {});
+  }
 
   const isDark = mode === 'dark' || (mode === 'system' && systemDark);
-  const colors = isDark ? (oled ? DARK_OLED : DARK) : LIGHT;
+  const variants = PALETTES[palette] ?? PALETTES.shiba;
+  const colors = isDark ? (oled ? variants.darkOled : variants.dark) : variants.light;
 
   return (
     <Ctx.Provider
-      value={{ colors, mode, setMode, oled, setOled, isDark }}
+      value={{
+        colors,
+        mode,
+        setMode,
+        oled,
+        setOled,
+        palette,
+        setPalette,
+        isDark,
+      }}
     >
       {children}
     </Ctx.Provider>

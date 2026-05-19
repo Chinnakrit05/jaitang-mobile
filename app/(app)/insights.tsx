@@ -15,7 +15,7 @@ import { useTheme } from '../../providers/ThemeProvider';
 import { useLocalTransactions } from '../../lib/queries/transactions-local';
 import { useCategories } from '../../lib/queries/categories';
 import { Donut, type DonutSlice } from '../../components/Donut';
-import { ShibaMascot } from '../../components/ShibaMascot';
+import { Mascot } from '../../components/Mascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
@@ -319,7 +319,7 @@ export default function InsightsScreen() {
           className="rounded-2xl p-4 flex-row items-center gap-3"
           style={{ backgroundColor: c.cardElevated }}
         >
-          <ShibaMascot size={64} />
+          <Mascot size={64} />
           <View className="flex-1">
             <Text style={{ color: c.text, fontSize: 13, lineHeight: 19 }}>
               {comparisonText}

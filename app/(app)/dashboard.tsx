@@ -21,7 +21,7 @@ import { useLocalMonthTransactions } from '../../lib/queries/transactions-local'
 import { useCategories } from '../../lib/queries/categories';
 import { useTrips } from '../../lib/queries/trips';
 import { Donut, type DonutSlice } from '../../components/Donut';
-import { ShibaMascot } from '../../components/ShibaMascot';
+import { Mascot } from '../../components/Mascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 import { SyncStatusBadge } from '../../components/SyncStatusBadge';
 
@@ -342,7 +342,7 @@ export default function DashboardScreen() {
               <Animated.View
                 style={[{ position: 'absolute', top: 8, right: 8 }, shibaBounce]}
               >
-                <ShibaMascot size={76} />
+                <Mascot size={76} />
               </Animated.View>
 
               <Text

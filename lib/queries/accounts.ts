@@ -1,12 +1,32 @@
-import { useQuery } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listLocalAccounts } from '../db/accounts';
+import { getLocalAccountBalances, listLocalAccounts } from '../db/accounts';
+import { refreshLedgerAccounts } from '../sync/accounts';
+import { supabase } from '../supabase/client';
+
+/**
+ * Account CRUD + queries.
+ *
+ * Reads come from the local SQLite mirror so the screen works offline.
+ * Writes go through SECURITY DEFINER Postgres functions (`create_account`
+ * etc.) — same pattern as categories and trips. Each mutation calls
+ * `refreshLedgerAccounts` to pull the fresh row back immediately and
+ * then invalidates `['local-accounts']` / `['account-balances']` so the
+ * UI re-renders without waiting for the next polling tick.
+ *
+ * `useAccountBalances` joins the account list with the live sum of
+ * income/expense on each one out of the local transactions table — so
+ * the displayed balance is whatever's been recorded locally, plus the
+ * initial seed amount.
+ */
+
+export type AccountType = 'cash' | 'bank' | 'credit_card' | 'e_wallet';
 
 export type Account = {
   id: string;
   ledger_id: string;
   name: string;
-  type: 'cash' | 'bank' | 'credit_card' | 'e_wallet';
+  type: AccountType;
   icon: string | null;
   color: string | null;
   currency: string | null;
@@ -14,10 +34,6 @@ export type Account = {
   archived: boolean;
 };
 
-/**
- * Reads the cached account list out of SQLite for the given ledger.
- * SyncProvider invalidates `['local-accounts']` after each pull.
- */
 export function useAccounts(
   ledgerId: string | undefined,
   opts: { includeArchived?: boolean } = {},
@@ -41,3 +57,143 @@ export function useAccounts(
     enabled: !!ledgerId,
   });
 }
+
+/**
+ * Map of account_id → current balance (initial + Σ tx delta) for the
+ * given ledger. Pairs naturally with `useAccounts` — render the list
+ * from one, read each row's balance from the other.
+ */
+export function useAccountBalances(ledgerId: string | undefined) {
+  return useQuery<Map<string, number>>({
+    queryKey: ['account-balances', ledgerId],
+    queryFn: () => getLocalAccountBalances(ledgerId!),
+    enabled: !!ledgerId,
+  });
+}
+
+export type NewAccountInput = {
+  ledger_id: string;
+  name: string;
+  type: AccountType;
+  icon?: string | null;
+  color?: string | null;
+  initial_balance?: number;
+  currency?: string | null;
+};
+
+export function useCreateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: NewAccountInput) => {
+      const { data, error } = await supabase.rpc('create_account', {
+        p_ledger_id: input.ledger_id,
+        p_name: input.name,
+        p_type: input.type,
+        p_icon: input.icon ?? null,
+        p_color: input.color ?? null,
+        p_initial_balance: input.initial_balance ?? 0,
+        p_currency: input.currency ?? null,
+      });
+      if (error) throw error;
+      await refreshLedgerAccounts(input.ledger_id);
+      await qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      await qc.invalidateQueries({ queryKey: ['account-balances'] });
+      await qc.refetchQueries({ queryKey: ['local-accounts'] });
+      return data as string;
+    },
+  });
+}
+
+export type UpdateAccountInput = {
+  id: string;
+  ledger_id: string;
+  name: string;
+  type: AccountType;
+  icon: string | null;
+  color: string | null;
+  initial_balance: number;
+  currency: string | null;
+};
+
+export function useUpdateAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: UpdateAccountInput) => {
+      const { error } = await supabase.rpc('update_account', {
+        p_id: input.id,
+        p_name: input.name,
+        p_type: input.type,
+        p_icon: input.icon,
+        p_color: input.color,
+        p_initial_balance: input.initial_balance,
+        p_currency: input.currency,
+      });
+      if (error) throw error;
+      await refreshLedgerAccounts(input.ledger_id);
+      await qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      await qc.invalidateQueries({ queryKey: ['account-balances'] });
+      await qc.refetchQueries({ queryKey: ['local-accounts'] });
+    },
+  });
+}
+
+export function useSetAccountArchived() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      id: string;
+      ledger_id: string;
+      archived: boolean;
+    }) => {
+      const { error } = await supabase.rpc('set_account_archived', {
+        p_id: input.id,
+        p_archived: input.archived,
+      });
+      if (error) throw error;
+      await refreshLedgerAccounts(input.ledger_id);
+      await qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      await qc.refetchQueries({ queryKey: ['local-accounts'] });
+    },
+  });
+}
+
+export function useDeleteAccount() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: { id: string; ledger_id: string }) => {
+      const { error } = await supabase.rpc('delete_account', {
+        p_id: input.id,
+      });
+      if (error) throw error;
+      await refreshLedgerAccounts(input.ledger_id);
+      await qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      await qc.invalidateQueries({ queryKey: ['account-balances'] });
+      await qc.refetchQueries({ queryKey: ['local-accounts'] });
+      // Transactions that referenced this account now have account_id =
+      // NULL server-side; invalidate so the local tx cache picks that
+      // up on the next pull tick.
+      await qc.invalidateQueries({ queryKey: ['local-tx'] });
+    },
+  });
+}
+
+/**
+ * Display metadata for each account type — surfaced in pickers + the
+ * accounts screen so users see consistent labels everywhere.
+ */
+export const ACCOUNT_TYPES: AccountType[] = [
+  'cash',
+  'bank',
+  'credit_card',
+  'e_wallet',
+];
+
+export const ACCOUNT_TYPE_META: Record<
+  AccountType,
+  { label: string; icon: string }
+> = {
+  cash: { label: 'เงินสด', icon: '💵' },
+  bank: { label: 'บัญชีธนาคาร', icon: '🏦' },
+  credit_card: { label: 'บัตรเครดิต', icon: '💳' },
+  e_wallet: { label: 'อีวอลเล็ต', icon: '📱' },
+};

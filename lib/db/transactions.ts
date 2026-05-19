@@ -103,7 +103,7 @@ export async function updateLocalTransaction(
     row._sync_state === 'pending_create' ? 'pending_create' : 'pending_update';
 
   const fields: string[] = [];
-  const values: unknown[] = [];
+  const values: (string | number | null)[] = [];
   if (patch.kind !== undefined) {
     fields.push('kind = ?');
     values.push(patch.kind);

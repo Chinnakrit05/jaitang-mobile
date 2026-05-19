@@ -27,7 +27,7 @@ import { useCategories } from '../../lib/queries/categories';
 import { useTrips } from '../../lib/queries/trips';
 import { useAddShortcut } from '../../lib/queries/shortcuts';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
-import { ShibaMascot } from '../../components/ShibaMascot';
+import { Mascot } from '../../components/Mascot';
 
 /**
  * Transactions list — port of `ui/Transaction List.html` (v2-playful).
@@ -335,7 +335,7 @@ export default function TransactionsScreen() {
                   backgroundColor: c.cardElevated,
                 }}
               >
-                <ShibaMascot size={48} />
+                <Mascot size={48} />
               </View>
               <View className="flex-1">
                 <Text style={{ color: c.text, fontSize: 13 }}>

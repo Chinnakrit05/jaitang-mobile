@@ -16,6 +16,7 @@ import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useActiveTrip } from '../../providers/ActiveTripProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import { useCategories } from '../../lib/queries/categories';
+import { useAccounts, ACCOUNT_TYPE_META } from '../../lib/queries/accounts';
 import { useCreateTransaction } from '../../lib/queries/transactions-local';
 import {
   useRemoveShortcut,
@@ -23,7 +24,7 @@ import {
 } from '../../lib/queries/shortcuts';
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
 import type { Shortcut } from '../../lib/shortcuts';
-import { ShibaMascot } from '../../components/ShibaMascot';
+import { Mascot } from '../../components/Mascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
@@ -70,6 +71,7 @@ export default function QuickAddScreen() {
   const { ledger } = useActiveLedger();
   const { trip: activeTrip } = useActiveTrip();
   const cats = useCategories(ledger?.id);
+  const accounts = useAccounts(ledger?.id);
   const create = useCreateTransaction();
   const shortcuts = useShortcuts(ledger?.id);
   const removeShortcut = useRemoveShortcut();
@@ -81,6 +83,7 @@ export default function QuickAddScreen() {
   const [note, setNote] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [payment, setPayment] = useState<'cash' | 'transfer'>('cash');
+  const [accountId, setAccountId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAllCats, setShowAllCats] = useState(false);
 
@@ -103,6 +106,7 @@ export default function QuickAddScreen() {
     setNote('');
     setCategoryId(null);
     setPayment('cash');
+    setAccountId(null);
     setError(null);
   }
 
@@ -140,6 +144,7 @@ export default function QuickAddScreen() {
         amount: value,
         note: note.trim() || null,
         category_id: categoryId,
+        account_id: accountId,
         // Auto-tag the new transaction to the active trip (if any) so
         // the user doesn't have to remember — matches the web app's
         // "active trip banner" behavior.
@@ -204,7 +209,7 @@ export default function QuickAddScreen() {
             {/* The mascot's viewBox includes a ground shadow — shift it
                 down slightly so the face sits centered in the circle. */}
             <View style={{ marginTop: 4 }}>
-              <ShibaMascot size={48} />
+              <Mascot size={48} />
             </View>
           </View>
           <View
@@ -411,6 +416,86 @@ export default function QuickAddScreen() {
             />
           </View>
         </View>
+
+        {/* Account picker — optional, links the transaction to a wallet
+            so the accounts screen's balance numbers add up. "ไม่ระบุ"
+            keeps account_id NULL. Only shows when the user has at least
+            one active account. */}
+        {(accounts.data ?? []).length > 0 && (
+          <View>
+            <Text
+              style={{
+                color: c.text,
+                fontSize: 13,
+                fontWeight: '600',
+                marginBottom: 8,
+                marginLeft: 2,
+              }}
+            >
+              บัญชี
+            </Text>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingRight: 4 }}
+            >
+              <Pressable
+                onPress={() => setAccountId(null)}
+                style={{
+                  paddingHorizontal: 14,
+                  paddingVertical: 10,
+                  borderRadius: 999,
+                  backgroundColor: accountId === null ? c.accent : c.card,
+                  borderWidth: 1,
+                  borderColor: accountId === null ? c.accent : c.border,
+                }}
+              >
+                <Text
+                  style={{
+                    color: accountId === null ? c.accentText : c.text,
+                    fontSize: 12,
+                    fontWeight: accountId === null ? '800' : '600',
+                  }}
+                >
+                  ไม่ระบุ
+                </Text>
+              </Pressable>
+              {(accounts.data ?? []).map((acc) => {
+                const sel = accountId === acc.id;
+                return (
+                  <Pressable
+                    key={acc.id}
+                    onPress={() => setAccountId(acc.id)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: 6,
+                      paddingHorizontal: 12,
+                      paddingVertical: 10,
+                      borderRadius: 999,
+                      backgroundColor: sel ? c.accent : c.card,
+                      borderWidth: 1,
+                      borderColor: sel ? c.accent : c.border,
+                    }}
+                  >
+                    <Text style={{ fontSize: 14 }}>
+                      {acc.icon ?? ACCOUNT_TYPE_META[acc.type].icon}
+                    </Text>
+                    <Text
+                      style={{
+                        color: sel ? c.accentText : c.text,
+                        fontSize: 12,
+                        fontWeight: sel ? '800' : '600',
+                      }}
+                    >
+                      {acc.name}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
         {/* Category grid — 4 columns, each tile its own card */}
         <View>

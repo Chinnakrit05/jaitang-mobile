@@ -79,6 +79,12 @@ export default function MoreScreen() {
 
   const general: RowSpec[] = [
     {
+      icon: 'accounts',
+      label: 'บัญชี / กระเป๋า',
+      hint: 'เงินสด, ธนาคาร, อีวอลเล็ต',
+      href: '/(app)/accounts',
+    },
+    {
       icon: 'categories',
       label: t('nav.categories'),
       hint: t('categories.subtitle'),

@@ -90,3 +90,60 @@ export async function pullAccounts(opts: {
   await setSyncState(LAST_PULL_KEY, cursor);
   return { pulled: data?.length ?? 0 };
 }
+
+/**
+ * Cursorless refresh for a single ledger — used right after a mutation
+ * so the UI doesn't have to wait for the next polling tick. Mirrors
+ * `refreshLedgerCategories` / `refreshLedgerRecurring`.
+ */
+export async function refreshLedgerAccounts(
+  ledgerId: string,
+): Promise<{ pulled: number }> {
+  const { data, error } = await supabase
+    .from('accounts')
+    .select(COLUMNS)
+    .eq('ledger_id', ledgerId);
+  if (error) throw error;
+
+  const db = await getDb();
+  await db.withTransactionAsync(async () => {
+    for (const r of data ?? []) {
+      await db.runAsync(
+        `INSERT INTO accounts (
+          id, ledger_id, name, type, icon, color, initial_balance,
+          currency, archived, created_at, updated_at, deleted_at, _sync_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'clean')
+        ON CONFLICT(id) DO UPDATE SET
+          ledger_id=excluded.ledger_id,
+          name=excluded.name,
+          type=excluded.type,
+          icon=excluded.icon,
+          color=excluded.color,
+          initial_balance=excluded.initial_balance,
+          currency=excluded.currency,
+          archived=excluded.archived,
+          created_at=excluded.created_at,
+          updated_at=excluded.updated_at,
+          deleted_at=excluded.deleted_at,
+          _sync_state='clean'
+        `,
+        [
+          r.id,
+          r.ledger_id,
+          r.name,
+          r.type,
+          r.icon,
+          r.color,
+          Number(r.initial_balance),
+          r.currency,
+          r.archived ? 1 : 0,
+          r.created_at,
+          r.updated_at,
+          r.deleted_at,
+        ],
+      );
+    }
+  });
+
+  return { pulled: data?.length ?? 0 };
+}
