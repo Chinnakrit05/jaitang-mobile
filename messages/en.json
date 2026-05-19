@@ -273,7 +273,15 @@
     "setBudget": "+ Set budget",
     "overBudget": "Over by {amount}",
     "nearBudget": "{pct}% used",
-    "remaining": "{amount} left"
+    "remaining": "{amount} left",
+    "totalBudget": "Budget",
+    "totalSpent": "Spent",
+    "amountRequired": "Enter a budget amount",
+    "saveFailed": "Couldn't save budget",
+    "deleteTitle": "Delete this budget?",
+    "deleteHint": "Only the budget is removed. Transactions stay untouched.",
+    "notSet": "Not set",
+    "tapToSet": "tap to set"
   },
   "recurring": {
     "title": "Recurring",

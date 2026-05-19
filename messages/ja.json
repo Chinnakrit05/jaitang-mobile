@@ -273,7 +273,15 @@
     "setBudget": "+ 予算を設定",
     "overBudget": "{amount} 超過",
     "nearBudget": "{pct}% 使用",
-    "remaining": "残り {amount}"
+    "remaining": "残り {amount}",
+    "totalBudget": "予算",
+    "totalSpent": "使用済み",
+    "amountRequired": "予算額を入力してください",
+    "saveFailed": "予算を保存できませんでした",
+    "deleteTitle": "この予算を削除しますか?",
+    "deleteHint": "予算だけを削除します。取引はそのまま残ります。",
+    "notSet": "未設定",
+    "tapToSet": "タップして設定"
   },
   "recurring": {
     "title": "定期取引",

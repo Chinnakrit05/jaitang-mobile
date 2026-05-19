@@ -52,6 +52,7 @@ export default function AppLayout() {
       <Tabs.Screen name="recurring" options={{ href: null }} />
       <Tabs.Screen name="trips" options={{ href: null }} />
       <Tabs.Screen name="accounts" options={{ href: null }} />
+      <Tabs.Screen name="budgets" options={{ href: null }} />
       <Tabs.Screen name="ledgers" options={{ href: null }} />
       <Tabs.Screen name="onboarding-ledger" options={{ href: null }} />
       <Tabs.Screen name="edit-transaction" options={{ href: null }} />

@@ -1,11 +1,11 @@
 # Jaitang Mobile — Roadmap
 
-> สถานะ ณ 2026-05-19 หลังจบ Accounts CRUD (#1)
+> สถานะ ณ 2026-05-19 หลังจบ Accounts CRUD (#1) และ Budgets (#2) ใน mobile repo
 >
 > ลำดับนี้คือสิ่งที่จะทำต่อไป จัดเรียงตามที่ตกลงในแชต:
 > 1. ✅ Accounts CRUD (เสร็จ)
-> 2. ⏭ Budgets
-> 3. Calendar heatmap
+> 2. ✅ Budgets (เสร็จ)
+> 3. ⏭ Calendar heatmap
 > 4. Transfers + multi-currency
 > 5. Goals / Loans
 
@@ -27,7 +27,7 @@
 
 ---
 
-## ⏭ #2 Budgets — กำลังจะทำ
+## ✅ #2 Budgets — ส่งเรียบร้อย
 
 **เป้าหมาย**
 ตั้งงบรายเดือนต่อหมวด (parent category) แล้วแสดงเปอร์เซ็นต์ที่ใช้ไปบนหน้าหลัก เพื่อให้ user เห็นทันทีว่าหมวดไหนใกล้เกิน
@@ -45,19 +45,25 @@
 - Local mirror: เพิ่ม `budgets` table ใน SQLite schema v5
 
 **Sub-tasks**
-- [ ] เพิ่ม budgets schema ใน local DB (v5 migration)
-- [ ] `lib/sync/budgets.ts` + pull-only mirror
-- [ ] `lib/queries/budgets.ts` + computed `useCategorySpend(monthStart, ledgerId)` → Map<categoryId, sumExpense>
-- [ ] `sql/budgets-rpc.sql`
-- [ ] `app/(app)/budgets.tsx`
-- [ ] Dashboard mood line ใช้ budgets จริง
-- [ ] Insights screen แสดง over/under budget per category
+- [x] เพิ่ม budgets schema ใน local DB (v5 migration)
+- [x] `lib/sync/budgets.ts` + pull-only mirror
+- [x] `lib/queries/budgets.ts` + computed `useCategorySpend(monthStart, ledgerId)` → Map<categoryId, sumExpense>
+- [x] `sql/budgets-rpc.sql`
+- [x] `app/(app)/budgets.tsx`
+- [x] Dashboard mood line ใช้ budgets จริง
+- [x] Insights screen แสดง over/under budget per category
 
 **ค่าประมาณ**: 1 session
 
+ไฟล์หลัก
+- `sql/budgets-rpc.sql`
+- `lib/db/budgets.ts`, `lib/sync/budgets.ts`, `lib/queries/budgets.ts`
+- `app/(app)/budgets.tsx`
+- `app/(app)/dashboard.tsx`, `app/(app)/insights.tsx`
+
 ---
 
-## #3 Calendar heatmap
+## ⏭ #3 Calendar heatmap
 
 **เป้าหมาย**
 หน้าใหม่แสดง grid 7×~6 (mon-sun × week) ของเดือนปัจจุบัน สีในแต่ละช่องคือความเข้มของรายจ่ายในวันนั้น แตะดูรายการทั้งวันได้

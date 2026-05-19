@@ -85,6 +85,12 @@ export default function MoreScreen() {
       href: '/(app)/accounts',
     },
     {
+      icon: 'budgets',
+      label: t('nav.budgets'),
+      hint: t('budgets.subtitle'),
+      href: '/(app)/budgets',
+    },
+    {
       icon: 'categories',
       label: t('nav.categories'),
       hint: t('categories.subtitle'),

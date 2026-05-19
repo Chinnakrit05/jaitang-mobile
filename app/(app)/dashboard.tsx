@@ -20,6 +20,7 @@ import { useTheme } from '../../providers/ThemeProvider';
 import { useLocalMonthTransactions } from '../../lib/queries/transactions-local';
 import { useCategories } from '../../lib/queries/categories';
 import { useTrips } from '../../lib/queries/trips';
+import { MONTHLY_BUDGET_PERIOD, useBudgets } from '../../lib/queries/budgets';
 import { Donut, type DonutSlice } from '../../components/Donut';
 import { Mascot } from '../../components/Mascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
@@ -142,6 +143,7 @@ export default function DashboardScreen() {
   const txs = useLocalMonthTransactions(ledger?.id);
   const cats = useCategories(ledger?.id);
   const trips = useTrips(ledger?.id);
+  const budgets = useBudgets(ledger?.id, MONTHLY_BUDGET_PERIOD);
   const c = useTheme().colors;
   const locale = i18n.resolvedLanguage ?? i18n.language;
 
@@ -205,7 +207,8 @@ export default function DashboardScreen() {
       .slice(0, 5);
   }, [txs.data]);
 
-  const budgetCap = 42000;
+  const budgetCap =
+    (budgets.data ?? []).reduce((s, b) => s + b.amount, 0) || 42000;
   const moodPct = Math.min(100, Math.round((monthExpense / budgetCap) * 100));
   const moodLabel =
     moodPct < 70

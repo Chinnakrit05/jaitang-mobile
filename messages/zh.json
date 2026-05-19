@@ -273,7 +273,15 @@
     "setBudget": "+ 设置预算",
     "overBudget": "超出 {amount}",
     "nearBudget": "已用 {pct}%",
-    "remaining": "剩余 {amount}"
+    "remaining": "剩余 {amount}",
+    "totalBudget": "预算",
+    "totalSpent": "已用",
+    "amountRequired": "请输入预算金额",
+    "saveFailed": "预算保存失败",
+    "deleteTitle": "删除此预算?",
+    "deleteHint": "只删除预算，交易记录会保留。",
+    "notSet": "未设置",
+    "tapToSet": "点击设置"
   },
   "recurring": {
     "title": "定期记录",

@@ -7,6 +7,7 @@ import { syncTransactions } from '../lib/sync/transactions';
 import { pullLedgers } from '../lib/sync/ledgers';
 import { pullCategories } from '../lib/sync/categories';
 import { pullAccounts } from '../lib/sync/accounts';
+import { pullBudgets } from '../lib/sync/budgets';
 import { pullRecurring } from '../lib/sync/recurring';
 import { pullTrips } from '../lib/sync/trips';
 import { listLocalLedgers } from '../lib/db/ledgers';
@@ -69,6 +70,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       // tables (single digits to dozens of rows each).
       const catResult = await pullCategories({ ledgerIds });
       const accResult = await pullAccounts({ ledgerIds });
+      const budgetResult = await pullBudgets({ ledgerIds });
       const recResult = await pullRecurring({ ledgerIds });
       const tripResult = await pullTrips({ ledgerIds });
 
@@ -83,6 +85,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (ledgerResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-ledgers'] });
       if (catResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-categories'] });
       if (accResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-accounts'] });
+      if (budgetResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-budgets'] });
       if (recResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-recurring'] });
       if (tripResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-trips'] });
       if (txResult.pulled > 0 || txResult.pushed > 0) {

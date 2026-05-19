@@ -273,7 +273,15 @@
     "setBudget": "+ ตั้งงบ",
     "overBudget": "เกินงบ {amount}",
     "nearBudget": "ใกล้เต็ม {pct}%",
-    "remaining": "เหลือ {amount}"
+    "remaining": "เหลือ {amount}",
+    "totalBudget": "งบรวม",
+    "totalSpent": "ใช้ไป",
+    "amountRequired": "ใส่งบก่อน",
+    "saveFailed": "บันทึกงบไม่สำเร็จ",
+    "deleteTitle": "ลบงบนี้?",
+    "deleteHint": "ลบเฉพาะงบ รายการต่างๆ ยังอยู่ครบ",
+    "notSet": "ยังไม่ได้ตั้งงบ",
+    "tapToSet": "แตะเพื่อตั้งงบ"
   },
   "recurring": {
     "title": "รายการประจำ",

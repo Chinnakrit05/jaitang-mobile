@@ -2,7 +2,7 @@
 
 Native iOS + Android client for [Jaitang](https://github.com/Chinnakrit05/jaitang). The app shares the same Supabase backend as the web app, but keeps a local SQLite mirror so the core money-tracking flow can work offline and sync later.
 
-> **Status:** active mobile build. This is no longer just scaffolding: auth, local persistence, sync, dashboard, quick add, ledgers, categories, recurring transactions, trips, settings, and Thai-first UI flows are in progress.
+> **Status:** active mobile build. This is no longer just scaffolding: auth, local persistence, sync, dashboard, quick add, ledgers, accounts, budgets, categories, recurring transactions, trips, settings, and Thai-first UI flows are in progress.
 
 ## Stack
 
@@ -31,18 +31,19 @@ Use `npx expo install <package>` for Expo SDK packages so versions stay compatib
 - Google OAuth via Supabase and `expo-auth-session`.
 - Dev email/password sign-in using `EXPO_PUBLIC_DEV_EMAIL` and `EXPO_PUBLIC_DEV_PASSWORD`.
 - Signed-in tab navigator: dashboard, transactions, quick add, insights, and more.
-- Hidden routed screens for settings, categories, recurring rules, trips, ledgers, onboarding, and transaction editing.
+- Hidden routed screens for settings, accounts, budgets, categories, recurring rules, trips, ledgers, onboarding, and transaction editing.
 - Smooth route transitions: stack pushes slide in, auth screens fade up, and tab changes use a subtle shift animation.
-- Local SQLite schema for transactions, ledgers, categories, accounts, recurring transactions, and trips.
+- Local SQLite schema for transactions, ledgers, categories, accounts, budgets, recurring transactions, and trips.
 - Offline-first transaction creation: quick add writes locally with `_sync_state='pending_create'`.
 - Sync loop that runs on sign-in, every 30 seconds, and when the device returns online.
-- Pull mirrors for ledgers, categories, accounts, recurring transactions, and trips.
+- Pull mirrors for ledgers, categories, accounts, budgets, recurring transactions, and trips.
 - Push/pull sync for transactions.
 - Active ledger persistence in AsyncStorage.
 - Active trip persistence per ledger, with new quick-add transactions auto-tagged to the active trip.
-- Dashboard totals, animated category breakdown, recent transactions, active trip card, sync badge, and theme-aware UI.
+- Dashboard totals, animated category breakdown, real budget mood, recent transactions, active trip card, sync badge, and theme-aware UI.
+- Budgets screen supports monthly parent-category budgets with progress states and category spend rollups.
 - Quick add has a sticky save bar above the tab footer so transactions can be saved without scrolling to the bottom.
-- Insights includes animated donut, payment-method progress bars, weekday bars, top category detail, and localized labels.
+- Insights includes animated donut, payment-method progress bars, weekday bars, top category detail, budget highlights, and localized labels.
 - Settings has the newer card-based layout with theme, language, ledger, icon-style, and sign-out controls.
 - Dark mode is wired through login, sync badge, dashboard hero chips, preview screens, and QR share surfaces.
 - Four message catalogs: Thai, English, Japanese, and Chinese.
@@ -51,6 +52,7 @@ Use `npx expo install <package>` for Expo SDK packages so versions stay compatib
 
 - **Language switching:** several primary screens now read from `react-i18next` catalogs instead of hardcoded Thai, including dashboard, quick add, transactions, categories, more, settings, insights, onboarding, and tab labels.
 - **Settings refresh:** settings was redesigned to match the rest of the app with a header, account hero, grouped sections, pill/grid controls, and theme-aware surfaces.
+- **Budgets:** added monthly parent-category budgets, local SQLite mirror/sync hooks, Supabase RPCs, dashboard budget mood, and insights budget highlights.
 - **Chart polish:** the shared donut chart animates its slices with Reanimated. Dashboard legends now show percentage, amount, and animated share bars. Insights adds top category detail, animated payment-method bars, and weekday spending amounts.
 - **Quick add ergonomics:** the save action is now sticky above the bottom tab bar and shows validation errors directly above the button.
 - **Navigation motion:** root stack, auth stack, and tab navigation now have smoother transitions instead of abrupt screen swaps.

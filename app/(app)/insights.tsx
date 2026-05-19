@@ -14,6 +14,7 @@ import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import { useLocalTransactions } from '../../lib/queries/transactions-local';
 import { useCategories } from '../../lib/queries/categories';
+import { MONTHLY_BUDGET_PERIOD, monthKey, useBudgets, useCategorySpend } from '../../lib/queries/budgets';
 import { Donut, type DonutSlice } from '../../components/Donut';
 import { Mascot } from '../../components/Mascot';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
@@ -134,6 +135,9 @@ export default function InsightsScreen() {
   const [period, setPeriod] = useState<Period>('month');
 
   const range = useMemo(() => getPeriodRange(period, locale), [period, locale]);
+  const budgetPeriod = monthKey(range.from);
+  const budgets = useBudgets(ledger?.id, MONTHLY_BUDGET_PERIOD);
+  const budgetSpend = useCategorySpend(ledger?.id, budgetPeriod);
   const periodLabels: Record<Period, string> = {
     week: t('navbarStat.periods.week'),
     month: t('navbarStat.periods.month'),
@@ -255,6 +259,17 @@ export default function InsightsScreen() {
   const heaviestDay = weekdayFullNames[heaviestIdx];
   const hasAnyData = periodExpense > 0;
   const topCategory = breakdown.rows[0] ?? null;
+  const budgetHighlights = useMemo(() => {
+    return (budgets.data ?? [])
+      .map((budget) => {
+        const cat = catById.get(budget.category_id);
+        const spent = budgetSpend.data?.get(budget.category_id) ?? 0;
+        const pct = budget.amount > 0 ? Math.round((spent / budget.amount) * 100) : 0;
+        return { budget, cat, spent, pct };
+      })
+      .sort((a, b) => b.pct - a.pct)
+      .slice(0, 3);
+  }, [budgets.data, budgetSpend.data, catById]);
 
   const comparisonText =
     pctChange === null
@@ -525,6 +540,55 @@ export default function InsightsScreen() {
               />
             </Animated.View>
           </View>
+        )}
+
+        {period === 'month' && budgetHighlights.length > 0 && (
+          <Animated.View
+            entering={FadeInDown.duration(420).delay(260)}
+            className="rounded-2xl p-4"
+            style={{ backgroundColor: c.card, gap: 10 }}
+          >
+            <View className="flex-row items-center justify-between">
+              <Text style={{ color: c.text, fontSize: 15, fontWeight: '600' }}>
+                {t('budgets.title')}
+              </Text>
+              <Text style={{ color: c.textSecondary, fontSize: 11 }}>
+                {new Intl.DateTimeFormat(locale, { month: 'short' }).format(range.from)}
+              </Text>
+            </View>
+            {budgetHighlights.map(({ budget, cat, spent, pct }) => {
+              const barColor =
+                pct >= 100 ? c.expense : pct >= 80 ? c.accent : c.income;
+              return (
+                <View key={budget.id} style={{ gap: 5 }}>
+                  <View className="flex-row items-center gap-2">
+                    <EmojiOrIcon value={cat?.icon} fallback="sparkle" size={16} />
+                    <Text
+                      numberOfLines={1}
+                      style={{ color: c.text, fontSize: 12, fontWeight: '700', flex: 1 }}
+                    >
+                      {cat?.name ?? t('common.uncategorized')}
+                    </Text>
+                    <Text style={{ color: barColor, fontSize: 11, fontWeight: '800' }}>
+                      {pct}%
+                    </Text>
+                  </View>
+                  <View className="h-1.5 rounded-full overflow-hidden" style={{ backgroundColor: c.bg }}>
+                    <View
+                      className="h-1.5 rounded-full"
+                      style={{
+                        width: `${Math.min(100, pct)}%`,
+                        backgroundColor: barColor,
+                      }}
+                    />
+                  </View>
+                  <Text style={{ color: c.textMuted, fontSize: 10 }}>
+                    ฿{formatTHB(spent)} / ฿{formatTHB(budget.amount)}
+                  </Text>
+                </View>
+              );
+            })}
+          </Animated.View>
         )}
 
         {/* 5. Streak banner — still mocked at 12 days */}

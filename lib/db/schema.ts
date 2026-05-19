@@ -12,12 +12,13 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  *     'pending_create' / 'pending_update' / 'pending_delete'. The push
  *     loop scans for non-clean rows and uploads them.
  *
- * Phase A covered `transactions`. Phase D adds the read-mostly trio
- * `categories`, `accounts`, `ledgers` — pull-only for now (writes
- * still hit Supabase directly until a phase wires up the push paths).
+ * Phase A covered `transactions`. Phase D added the read-mostly trio
+ * `categories`, `accounts`, `ledgers`; v5 adds monthly budgets. These
+ * mirrors are pull-only for now (writes still hit Supabase directly
+ * until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 4;
+const SCHEMA_VERSION = 5;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -150,6 +151,21 @@ const STATEMENTS = [
     _sync_state TEXT NOT NULL DEFAULT 'clean'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_trips_ledger ON trips(ledger_id, archived, starts_at DESC)`,
+
+  // ---- v5: monthly budgets mirror (pull-only) ----
+  `CREATE TABLE IF NOT EXISTS budgets (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    category_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    period TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT,
+    deleted_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_budgets_ledger_period ON budgets(ledger_id, period) WHERE deleted_at IS NULL`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_unique_active ON budgets(ledger_id, category_id, period) WHERE deleted_at IS NULL`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {
