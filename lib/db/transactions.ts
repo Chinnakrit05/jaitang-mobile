@@ -173,6 +173,22 @@ export async function listLocalTransactions(opts: {
   );
 }
 
+export async function listLocalTransactionsForRange(opts: {
+  ledgerId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<LocalTx[]> {
+  const db = await getDb();
+  return db.getAllAsync<LocalTx>(
+    `SELECT * FROM transactions
+     WHERE ledger_id = ? AND deleted_at IS NULL
+       AND occurred_at >= ? AND occurred_at < ?
+     ORDER BY occurred_at DESC`,
+    [opts.ledgerId, opts.startDate, opts.endDate],
+  );
+}
+
+
 export async function countPendingTransactions(): Promise<number> {
   const db = await getDb();
   const row = await db.getFirstAsync<{ n: number }>(

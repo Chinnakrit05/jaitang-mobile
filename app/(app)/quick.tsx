@@ -8,7 +8,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
 
@@ -77,6 +77,8 @@ export default function QuickAddScreen() {
   const removeShortcut = useRemoveShortcut();
   const c = useTheme().colors;
   const insets = useSafeAreaInsets();
+  const params = useLocalSearchParams<{ date?: string }>();
+
 
   const [kind, setKind] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
@@ -150,10 +152,13 @@ export default function QuickAddScreen() {
         // "active trip banner" behavior.
         trip_id: activeTrip?.id ?? null,
         payment_method: payment,
-        occurred_at: new Date().toISOString(),
+        occurred_at: params.date
+          ? `${params.date}T12:00:00.000Z`
+          : new Date().toISOString(),
       });
       reset();
       router.replace('/(app)/transactions');
+
     } catch (e) {
       console.error('createTransaction failed:', e);
       const msg = e instanceof Error ? e.message : t('quick.saveFailed');

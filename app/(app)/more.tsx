@@ -85,6 +85,12 @@ export default function MoreScreen() {
       href: '/(app)/accounts',
     },
     {
+      icon: 'calendar',
+      label: t('calendar.title', { defaultValue: 'ปฏิทิน' }),
+      hint: t('calendar.subtitle', { defaultValue: 'ดูแผนที่ความเข้มของการใช้จ่ายแต่ละวัน' }),
+      href: '/(app)/calendar',
+    },
+    {
       icon: 'budgets',
       label: t('nav.budgets'),
       hint: t('budgets.subtitle'),
@@ -96,6 +102,7 @@ export default function MoreScreen() {
       hint: t('categories.subtitle'),
       href: '/(app)/categories',
     },
+
     {
       icon: 'recurring',
       label: t('nav.recurring'),

@@ -9,6 +9,7 @@ import {
   deleteLocalTransaction,
   getLocalTransaction,
   listLocalTransactions,
+  listLocalTransactionsForRange,
   updateLocalTransaction,
   type NewTxInput,
   type UpdateTxInput,
@@ -40,6 +41,24 @@ export function useLocalTransactions(opts: {
     enabled: !!opts.ledgerId,
   });
 }
+
+export function useLocalRangeTransactions(opts: {
+  ledgerId: string | undefined;
+  startDate: string | undefined;
+  endDate: string | undefined;
+}) {
+  return useQuery<LocalTx[]>({
+    queryKey: [...QK, opts.ledgerId, 'range', opts.startDate, opts.endDate],
+    queryFn: () =>
+      listLocalTransactionsForRange({
+        ledgerId: opts.ledgerId!,
+        startDate: opts.startDate!,
+        endDate: opts.endDate!,
+      }),
+    enabled: !!opts.ledgerId && !!opts.startDate && !!opts.endDate,
+  });
+}
+
 
 export function useLocalMonthTransactions(ledgerId: string | undefined) {
   const all = useLocalTransactions({ ledgerId, limit: 500 });
