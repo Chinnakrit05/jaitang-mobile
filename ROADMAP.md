@@ -7,7 +7,7 @@
 > 2. ✅ Budgets (เสร็จ)
 > 3. ✅ Calendar heatmap
 > 4. ✅ Transfers + multi-currency
-> 5. Goals / Loans
+> 5. ✅ Goals / Loans
 
 ---
 
@@ -144,7 +144,11 @@
 - ต้องเขียน RPCs: `create_goal`, `update_goal`, `add_goal_contribution`, `set_goal_archived`, `delete_goal`
 - เช่นเดียวกัน: `create_loan`, `update_loan`, `add_loan_repayment`, `delete_loan`
 
-**ค่าประมาณ**: 2 sessions (1 สำหรับ Goals, 1 สำหรับ Loans)
+**สถานะ**
+- ✅ **Goals (เซสชันนี้)** — `sql/goals-rpc.sql` (write + read RPC: create/update/set_archived/delete_goal, add/delete_goal_contribution, list_goals, list_goal_contributions), SQLite v7 mirror (goals + goal_contributions, replace-all), `lib/sync/goals.ts` (wire SyncProvider), `lib/db/goals.ts` + `lib/queries/goals.ts`, หน้า `app/(app)/goals.tsx` (progress bar + contribution sheet) + route + เมนู More. Contribution เป็น log แยก (ไม่แตะ transactions/บัญชี) **ต้องรัน `sql/goals-rpc.sql` บน Supabase**
+- ✅ **Loans (เซสชันนี้)** — `sql/loans-rpc.sql` (create/update/set_loan_status/delete_loan, add/delete_loan_repayment, list_loans, list_loan_repayments), SQLite v8 mirror (loans + loan_repayments, replace-all), `lib/sync/loans.ts` (wire SyncProvider), `lib/db/loans.ts` + `lib/queries/loans.ts`, หน้า `app/(app)/loans.tsx` (net position + ให้ยืม/ยืมมา + repayment sheet + ชำระครบ) + route + เมนู More. **ต้องรัน `sql/loans-rpc.sql` บน Supabase** (หมายเหตุ: ถ้า loans.kind/status เป็น enum ต้องเติม cast)
+
+**ค่าประมาณ**: 2 sessions — เสร็จทั้ง #5 แล้ว ✅ (Goals + Loans)
 
 ---
 

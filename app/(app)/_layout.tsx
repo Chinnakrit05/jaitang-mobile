@@ -53,6 +53,9 @@ export default function AppLayout() {
       <Tabs.Screen name="trips" options={{ href: null }} />
       <Tabs.Screen name="accounts" options={{ href: null }} />
       <Tabs.Screen name="transfers" options={{ href: null }} />
+      <Tabs.Screen name="goals" options={{ href: null }} />
+      <Tabs.Screen name="loans" options={{ href: null }} />
+      <Tabs.Screen name="report" options={{ href: null }} />
       <Tabs.Screen name="budgets" options={{ href: null }} />
       <Tabs.Screen name="calendar" options={{ href: null }} />
       <Tabs.Screen name="ledgers" options={{ href: null }} />

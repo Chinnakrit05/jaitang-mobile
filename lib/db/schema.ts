@@ -18,7 +18,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 8;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -198,6 +198,82 @@ const STATEMENTS = [
     _sync_state TEXT NOT NULL DEFAULT 'clean'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_transfers_ledger ON transfers(ledger_id, occurred_at DESC)`,
+
+  // ---- v7: goals + goal_contributions mirror (pull-only, replace-all) ----
+  // Savings targets and their contribution log. Contributions are a
+  // SEPARATE ledger of deposits toward a goal — they do NOT touch the
+  // transactions table or account balances (matches the web app).
+  //
+  // Neither server table has `deleted_at` (hard delete, like trips), so
+  // the pull is replace-all per ledger. `goal_contributions` denormalizes
+  // `ledger_id` (resolved server-side via the parent goal) so the mirror
+  // can wipe-and-replace per ledger without a local join.
+  `CREATE TABLE IF NOT EXISTS goals (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    name TEXT NOT NULL,
+    icon TEXT,
+    color TEXT,
+    target_amount REAL NOT NULL DEFAULT 0,
+    deadline TEXT,
+    archived INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT,
+    updated_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_goals_ledger ON goals(ledger_id, archived, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS goal_contributions (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT NOT NULL,
+    ledger_id TEXT NOT NULL,
+    user_id TEXT,
+    amount REAL NOT NULL,
+    note TEXT,
+    occurred_at TEXT NOT NULL,
+    created_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_goal_contrib_goal ON goal_contributions(goal_id, occurred_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_goal_contrib_ledger ON goal_contributions(ledger_id)`,
+
+  // ---- v8: loans + loan_repayments mirror (pull-only, replace-all) ----
+  // Money lent to / borrowed from someone, with a partial-repayment log.
+  // outstanding = principal − Σ repayments. Like trips, no `deleted_at`
+  // server-side → replace-all pull. `loan_repayments` denormalizes
+  // `ledger_id` (resolved server-side via the parent loan) for per-ledger
+  // wipe-and-replace without a local join.
+  `CREATE TABLE IF NOT EXISTS loans (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    user_id TEXT,
+    kind TEXT NOT NULL CHECK (kind IN ('lent','borrowed')),
+    counterparty TEXT,
+    principal REAL NOT NULL DEFAULT 0,
+    currency TEXT,
+    started_at TEXT,
+    due_date TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    settled_at TEXT,
+    note TEXT,
+    created_at TEXT,
+    updated_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_loans_ledger ON loans(ledger_id, status, created_at)`,
+
+  `CREATE TABLE IF NOT EXISTS loan_repayments (
+    id TEXT PRIMARY KEY,
+    loan_id TEXT NOT NULL,
+    ledger_id TEXT NOT NULL,
+    amount REAL NOT NULL,
+    occurred_at TEXT NOT NULL,
+    note TEXT,
+    created_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_loan_repay_loan ON loan_repayments(loan_id, occurred_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS idx_loan_repay_ledger ON loan_repayments(ledger_id)`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

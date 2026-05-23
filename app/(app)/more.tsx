@@ -79,6 +79,12 @@ export default function MoreScreen() {
 
   const general: RowSpec[] = [
     {
+      icon: 'receipt',
+      label: t('nav.report', { defaultValue: 'รายงานรายเดือน' }),
+      hint: t('report.subtitle', { defaultValue: 'สรุปแต่ละเดือน + บิลประจำที่ต้องกรอก' }),
+      href: '/(app)/report',
+    },
+    {
       icon: 'accounts',
       label: 'บัญชี / กระเป๋า',
       hint: 'เงินสด, ธนาคาร, อีวอลเล็ต',
@@ -89,6 +95,18 @@ export default function MoreScreen() {
       label: t('nav.transfers', { defaultValue: 'โอนเงิน' }),
       hint: t('transfers.subtitle', { defaultValue: 'ย้ายเงินระหว่างบัญชี' }),
       href: '/(app)/transfers',
+    },
+    {
+      icon: 'goals',
+      label: t('nav.goals', { defaultValue: 'เป้าออม' }),
+      hint: t('goals.subtitle', { defaultValue: 'ตั้งเป้าหมายแล้วค่อยๆ เก็บเงิน' }),
+      href: '/(app)/goals',
+    },
+    {
+      icon: 'loans',
+      label: t('nav.loans', { defaultValue: 'หนี้สิน' }),
+      hint: t('loans.subtitle', { defaultValue: 'เงินให้ยืม / ยืมมา + ผ่อนชำระ' }),
+      href: '/(app)/loans',
     },
     {
       icon: 'calendar',

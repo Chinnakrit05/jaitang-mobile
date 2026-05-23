@@ -11,6 +11,8 @@ import { pullBudgets } from '../lib/sync/budgets';
 import { pullRecurring } from '../lib/sync/recurring';
 import { pullTrips } from '../lib/sync/trips';
 import { pullTransfers } from '../lib/sync/transfers';
+import { pullGoals, pullGoalContributions } from '../lib/sync/goals';
+import { pullLoans, pullLoanRepayments } from '../lib/sync/loans';
 import { listLocalLedgers } from '../lib/db/ledgers';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
@@ -75,6 +77,10 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const recResult = await pullRecurring({ ledgerIds });
       const tripResult = await pullTrips({ ledgerIds });
       const transferResult = await pullTransfers({ ledgerIds });
+      const goalResult = await pullGoals({ ledgerIds });
+      const goalContribResult = await pullGoalContributions({ ledgerIds });
+      const loanResult = await pullLoans({ ledgerIds });
+      const loanRepayResult = await pullLoanRepayments({ ledgerIds });
 
       // 4. Transactions last (push-then-pull, may take longer).
       const txResult = await syncTransactions({ ledgerIds });
@@ -94,6 +100,14 @@ export function SyncProvider({ children }: { children: ReactNode }) {
         qc.invalidateQueries({ queryKey: ['local-transfers'] });
         // Balances factor in transfers, so refresh them too.
         qc.invalidateQueries({ queryKey: ['account-balances'] });
+      }
+      if (goalResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-goals'] });
+      if (goalContribResult.pulled > 0) {
+        qc.invalidateQueries({ queryKey: ['local-goal-contributions'] });
+      }
+      if (loanResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-loans'] });
+      if (loanRepayResult.pulled > 0) {
+        qc.invalidateQueries({ queryKey: ['local-loan-repayments'] });
       }
       if (txResult.pulled > 0 || txResult.pushed > 0) {
         qc.invalidateQueries({ queryKey: ['local-tx'] });
