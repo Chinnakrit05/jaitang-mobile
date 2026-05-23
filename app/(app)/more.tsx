@@ -85,6 +85,12 @@ export default function MoreScreen() {
       href: '/(app)/accounts',
     },
     {
+      icon: 'arrow-left-right',
+      label: t('nav.transfers', { defaultValue: 'โอนเงิน' }),
+      hint: t('transfers.subtitle', { defaultValue: 'ย้ายเงินระหว่างบัญชี' }),
+      href: '/(app)/transfers',
+    },
+    {
       icon: 'calendar',
       label: t('calendar.title', { defaultValue: 'ปฏิทิน' }),
       hint: t('calendar.subtitle', { defaultValue: 'ดูแผนที่ความเข้มของการใช้จ่ายแต่ละวัน' }),

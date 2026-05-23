@@ -26,6 +26,7 @@ import {
   type Account,
   type AccountType,
 } from '../../lib/queries/accounts';
+import { currencySymbol } from '../../lib/fx';
 
 /**
  * Accounts screen — CRUD for the user's wallets (cash, bank, credit
@@ -678,7 +679,9 @@ function AccountRow({
             fontWeight: '800',
           }}
         >
-          {balance < 0 ? '-' : ''}฿{thousands(Math.abs(balance))}
+          {balance < 0 ? '-' : ''}
+          {currencySymbol(account.currency ?? 'THB')}
+          {thousands(Math.abs(balance))}
         </Text>
         <Text style={{ color: colors.textMuted, fontSize: 10, marginTop: 2 }}>
           คงเหลือ

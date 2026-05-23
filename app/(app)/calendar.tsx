@@ -77,6 +77,27 @@ function formatTime(iso: string) {
   }
 }
 
+/**
+ * Compact money formatter for the tiny per-day cell labels. Keeps the
+ * string to ≤4 chars so it fits a ~46px-wide cell:
+ *   850   → "850"
+ *   1200  → "1.2k"
+ *   15000 → "15k"
+ *   1_500_000 → "1.5M"
+ */
+function abbrevAmount(n: number): string {
+  const v = Math.round(n);
+  if (v >= 1_000_000) {
+    const m = v / 1_000_000;
+    return (m >= 10 ? Math.round(m).toString() : m.toFixed(1).replace(/\.0$/, '')) + 'M';
+  }
+  if (v >= 1_000) {
+    const k = v / 1_000;
+    return (k >= 10 ? Math.round(k).toString() : k.toFixed(1).replace(/\.0$/, '')) + 'k';
+  }
+  return String(v);
+}
+
 export default function CalendarScreen() {
   const { t, i18n } = useTranslation();
   const c = useTheme().colors;
@@ -393,15 +414,15 @@ export default function CalendarScreen() {
                       key={cell.key}
                       style={{
                         width: '13.5%',
-                        aspectRatio: 1,
+                        height: 54,
                         alignItems: 'center',
                         justifyContent: 'center',
                         opacity: 0.1,
                       }}
                     >
                       <View
-                        className="w-10 h-10 rounded-xl"
-                        style={{ backgroundColor: c.bg }}
+                        className="rounded-xl"
+                        style={{ width: '100%', height: '100%', backgroundColor: c.bg }}
                       />
                     </View>
                   );
@@ -412,7 +433,9 @@ export default function CalendarScreen() {
                 const isToday = todayBkk === dateStr;
                 const stats = dailyStats[dateStr];
                 const dayExpense = stats?.expense ?? 0;
-                const hasIncome = (stats?.income ?? 0) > 0;
+                const dayIncome = stats?.income ?? 0;
+                const hasIncome = dayIncome > 0;
+                const hasExpense = dayExpense > 0;
 
                 // Level determination
                 let level = 0;
@@ -441,16 +464,27 @@ export default function CalendarScreen() {
                   textCol = c.accentText ?? '#FFFFFF';
                 }
 
+                // On the darkest cell (level 4) the accent fill is solid,
+                // so the colored amount labels need to flip to white to
+                // stay legible; otherwise use the semantic income/expense
+                // colors.
+                const expenseLabelCol = level === 4 ? '#FFFFFF' : c.expense;
+                const incomeLabelCol = level >= 3 ? '#FFFFFF' : c.income;
+
                 return (
                   <Animated.View
                     key={cell.key}
                     entering={FadeInDown.duration(260).delay(idx * 8)}
-                    style={{ width: '13.5%', aspectRatio: 1 }}
+                    style={{ width: '13.5%', height: 54 }}
                   >
                     <Pressable
                       onPress={() => setSelectedDate(dateStr)}
-                      className="w-10 h-10 rounded-xl items-center justify-between py-1 relative overflow-hidden"
+                      className="rounded-xl items-center overflow-hidden"
                       style={{
+                        width: '100%',
+                        height: '100%',
+                        paddingTop: 4,
+                        paddingBottom: 3,
                         backgroundColor: cellBg,
                         borderWidth: isSelected ? 2 : isToday ? 1.5 : 0,
                         borderColor: isSelected ? c.text : isToday ? c.textMuted : levelBorderCol,
@@ -459,23 +493,44 @@ export default function CalendarScreen() {
                       <Text
                         style={{
                           color: textCol,
-                          fontSize: 13,
+                          fontSize: 12,
                           fontWeight: isSelected || isToday ? '700' : '500',
-                          marginTop: 1,
                         }}
                       >
                         {cell.day}
                       </Text>
 
-                      {/* Income green dot indicator */}
-                      {hasIncome && (
-                        <View
-                          className="w-1.5 h-1.5 rounded-full absolute bottom-1.5"
-                          style={{
-                            backgroundColor: level === 4 ? '#FFFFFF' : c.income,
-                          }}
-                        />
-                      )}
+                      {/* Tiny per-day amounts — expense on top, income
+                          below. Each only renders when non-zero so empty
+                          days stay clean. */}
+                      <View style={{ flex: 1, justifyContent: 'flex-end', alignItems: 'center' }}>
+                        {hasExpense && (
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              color: expenseLabelCol,
+                              fontSize: 8,
+                              fontWeight: '700',
+                              lineHeight: 10,
+                            }}
+                          >
+                            -{abbrevAmount(dayExpense)}
+                          </Text>
+                        )}
+                        {hasIncome && (
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              color: incomeLabelCol,
+                              fontSize: 8,
+                              fontWeight: '700',
+                              lineHeight: 10,
+                            }}
+                          >
+                            +{abbrevAmount(dayIncome)}
+                          </Text>
+                        )}
+                      </View>
                     </Pressable>
                   </Animated.View>
                 );
@@ -502,9 +557,11 @@ export default function CalendarScreen() {
               </Text>
             </View>
 
-            {/* Income Key */}
+            {/* Income Key — matches the "+amount" label shown in cells */}
             <View className="flex-row items-center gap-1.5">
-              <View className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: c.income }} />
+              <Text style={{ color: c.income, fontSize: 10, fontWeight: '700' }}>
+                +฿
+              </Text>
               <Text style={{ color: c.textMuted, fontSize: 10 }}>
                 {t('calendar.legendIncome')}
               </Text>

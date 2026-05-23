@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//Users/devcat/Documents/jaitang-mobile/node_modules/expo/bin/**)",
+      "Read(//Users/devcat/Documents/jaitang-mobile/node_modules/**)"
+    ]
+  }
+}

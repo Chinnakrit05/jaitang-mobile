@@ -5,8 +5,8 @@
 > ลำดับนี้คือสิ่งที่จะทำต่อไป จัดเรียงตามที่ตกลงในแชต:
 > 1. ✅ Accounts CRUD (เสร็จ)
 > 2. ✅ Budgets (เสร็จ)
-> 3. ⏭ Calendar heatmap
-> 4. Transfers + multi-currency
+> 3. ✅ Calendar heatmap
+> 4. ✅ Transfers + multi-currency
 > 5. Goals / Loans
 
 ---
@@ -101,15 +101,22 @@
 - Account balance — รองรับยอดในสกุลต่างๆ (ตอนนี้ฮาร์ดโค้ดเป็น ฿)
 
 **Sub-tasks**
-- [ ] `sql/transfers-rpc.sql` — `create_transfer`, `update_transfer`, `delete_transfer`
-- [ ] Local mirror สำหรับ transfers
-- [ ] `lib/fx.ts` — fetch + cache rates
-- [ ] หน้า transfers
-- [ ] รวม transfers เข้า transactions list view (เป็น row พิเศษ)
-- [ ] Currency picker ใน quick + edit-transaction
-- [ ] Account balance per currency
 
-**ค่าประมาณ**: 2 sessions (เป็นฟีเจอร์หลายชั้น)
+ส่วน A — Transfers (เซสชันนี้ ✅)
+- [x] `sql/transfers-rpc.sql` — `create_transfer`, `update_transfer`, `delete_transfer` (ต้องรันบน Supabase)
+- [x] Local mirror สำหรับ transfers (SQLite v6, replace-all pull แบบเดียวกับ trips)
+- [x] หน้า `app/(app)/transfers.tsx` (จากเมนู More) + register route
+- [x] รวม transfers เข้า transactions list view (row สี trip-blue ไอคอน ⇄, ไม่นับเข้ายอดวัน)
+- [x] Account balance รวมผลการโอน (from −from_amount, to +to_amount) — ถูกต้องสำหรับสกุลเดียว
+
+ส่วน B — Multi-currency (เซสชันนี้ ✅)
+- [x] `lib/fx.ts` — fetch + cache rates (Frankfurter.dev, cache 24h ใน AsyncStorage) + `useFxRate` hook + `CURRENCY_META`
+- [x] Currency picker ใน quick + edit-transaction (ชุดสั้น ~12 สกุล, home ขึ้นก่อน) — เก็บ `amount`=home, `fx_currency/fx_amount/fx_rate`=ต่างประเทศ + preview ยอด home สด
+- [x] Account balance per currency — `getLocalAccountBalances` คิดเป็นสกุลของบัญชี, accounts.tsx โชว์สัญลักษณ์ตามสกุล
+- [x] Transfer ข้ามสกุล: auto-fill ยอดปลายทางจาก FX rate (แก้เองได้)
+- [x] โชว์ยอดต่างประเทศใน transactions list (subline ใต้ยอด ฿)
+
+**ค่าประมาณ**: 2 sessions — เสร็จทั้ง #4 แล้ว ✅ (ต้องรัน `sql/transfers-rpc.sql` ถ้ายังไม่รัน)
 
 ---
 

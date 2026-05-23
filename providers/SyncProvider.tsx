@@ -10,6 +10,7 @@ import { pullAccounts } from '../lib/sync/accounts';
 import { pullBudgets } from '../lib/sync/budgets';
 import { pullRecurring } from '../lib/sync/recurring';
 import { pullTrips } from '../lib/sync/trips';
+import { pullTransfers } from '../lib/sync/transfers';
 import { listLocalLedgers } from '../lib/db/ledgers';
 
 type SyncStatus = 'idle' | 'syncing' | 'error';
@@ -73,6 +74,7 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const budgetResult = await pullBudgets({ ledgerIds });
       const recResult = await pullRecurring({ ledgerIds });
       const tripResult = await pullTrips({ ledgerIds });
+      const transferResult = await pullTransfers({ ledgerIds });
 
       // 4. Transactions last (push-then-pull, may take longer).
       const txResult = await syncTransactions({ ledgerIds });
@@ -88,6 +90,11 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       if (budgetResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-budgets'] });
       if (recResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-recurring'] });
       if (tripResult.pulled > 0) qc.invalidateQueries({ queryKey: ['local-trips'] });
+      if (transferResult.pulled > 0) {
+        qc.invalidateQueries({ queryKey: ['local-transfers'] });
+        // Balances factor in transfers, so refresh them too.
+        qc.invalidateQueries({ queryKey: ['account-balances'] });
+      }
       if (txResult.pulled > 0 || txResult.pushed > 0) {
         qc.invalidateQueries({ queryKey: ['local-tx'] });
       }

@@ -18,7 +18,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 5;
+const SCHEMA_VERSION = 6;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -166,6 +166,38 @@ const STATEMENTS = [
   )`,
   `CREATE INDEX IF NOT EXISTS idx_budgets_ledger_period ON budgets(ledger_id, period) WHERE deleted_at IS NULL`,
   `CREATE UNIQUE INDEX IF NOT EXISTS idx_budgets_unique_active ON budgets(ledger_id, category_id, period) WHERE deleted_at IS NULL`,
+
+  // ---- v6: transfers mirror (pull-only, replace-all) ----
+  // Cross-account money moves (cash → bank, bank → e-wallet, and
+  // cross-currency variants). NOT income/expense — kept out of the
+  // transactions table so they don't double-count in spend totals.
+  //
+  // The server `transfers` table has no `deleted_at` (it hard-deletes,
+  // same as trips / recurring), so the pull replaces local rows for the
+  // synced ledgers each cycle. `updated_at` is also absent server-side —
+  // the local column exists for parity but is never populated.
+  //
+  // Same-currency transfer: from_amount == to_amount, from_currency ==
+  // to_currency, fx_rate = 1. Cross-currency: to_amount = from_amount ×
+  // fx_rate, currencies differ.
+  `CREATE TABLE IF NOT EXISTS transfers (
+    id TEXT PRIMARY KEY,
+    ledger_id TEXT NOT NULL,
+    user_id TEXT,
+    from_account_id TEXT,
+    to_account_id TEXT,
+    from_amount REAL NOT NULL,
+    from_currency TEXT,
+    to_amount REAL NOT NULL,
+    to_currency TEXT,
+    fx_rate REAL,
+    note TEXT,
+    occurred_at TEXT NOT NULL,
+    created_at TEXT,
+    updated_at TEXT,
+    _sync_state TEXT NOT NULL DEFAULT 'clean'
+  )`,
+  `CREATE INDEX IF NOT EXISTS idx_transfers_ledger ON transfers(ledger_id, occurred_at DESC)`,
 ];
 
 export async function migrate(db: SQLiteDatabase): Promise<void> {

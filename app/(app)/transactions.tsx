@@ -25,6 +25,9 @@ import {
 import type { LocalTx } from '../../lib/sync/transactions';
 import { useCategories } from '../../lib/queries/categories';
 import { useTrips } from '../../lib/queries/trips';
+import { useTransfers, type Transfer } from '../../lib/queries/transfers';
+import { useAccounts } from '../../lib/queries/accounts';
+import { currencySymbol } from '../../lib/fx';
 import { useAddShortcut } from '../../lib/queries/shortcuts';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 import { Mascot } from '../../components/Mascot';
@@ -122,6 +125,33 @@ function SearchIcon({ color, size }: { color: string; size: number }) {
   );
 }
 
+function SwapIcon({ color, size }: { color: string; size: number }) {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M7 7h13l-3.5-3.5M17 17H4l3.5 3.5"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </Svg>
+  );
+}
+
+function transferMoney(amount: number, currency: string | null): string {
+  const cur = currency ?? 'THB';
+  if (cur === 'THB') return `฿${formatTHB(amount)}`;
+  return `${formatTHB(amount)} ${cur}`;
+}
+
+// A row in the date-grouped list is either a transaction or a transfer.
+// Transfers are net-zero money moves between accounts, so they show up as
+// informational rows that don't count toward day totals.
+type FeedItem =
+  | { type: 'tx'; key: string; at: string; tx: LocalTx }
+  | { type: 'transfer'; key: string; at: string; transfer: Transfer };
+
 export default function TransactionsScreen() {
   const { t, i18n } = useTranslation();
   const { ledger, loading: ledgerLoading } = useActiveLedger();
@@ -148,6 +178,16 @@ export default function TransactionsScreen() {
   const tripById = useMemo(
     () => new Map((trips.data ?? []).map((t) => [t.id, t])),
     [trips.data],
+  );
+
+  // Transfers + account lookup so transfer rows can name their source /
+  // destination wallets. Transfers only show when no category filter is
+  // active (they carry no category).
+  const transfers = useTransfers(ledger?.id);
+  const accounts = useAccounts(ledger?.id, { includeArchived: true });
+  const accById = useMemo(
+    () => new Map((accounts.data ?? []).map((a) => [a.id, a])),
+    [accounts.data],
   );
 
   // Long-press on a row opens this action sheet — `null` means closed.
@@ -193,18 +233,39 @@ export default function TransactionsScreen() {
       ? (txs.data ?? []).filter((t) => t.category_id === activeFilter)
       : (txs.data ?? []);
 
-    const byDay = new Map<string, LocalTx[]>();
+    const byDay = new Map<string, FeedItem[]>();
     for (const t of filtered) {
       const day = t.occurred_at.slice(0, 10);
       if (!byDay.has(day)) byDay.set(day, []);
-      byDay.get(day)!.push(t);
+      byDay.get(day)!.push({ type: 'tx', key: t.id, at: t.occurred_at, tx: t });
     }
+    // Transfers have no category, so only fold them in on the unfiltered
+    // (All) view. They're informational rows — they don't affect the
+    // per-day net / "all expenses" computation below.
+    if (!activeFilter) {
+      for (const tr of transfers.data ?? []) {
+        const day = tr.occurred_at.slice(0, 10);
+        if (!byDay.has(day)) byDay.set(day, []);
+        byDay.get(day)!.push({
+          type: 'transfer',
+          key: `tr_${tr.id}`,
+          at: tr.occurred_at,
+          transfer: tr,
+        });
+      }
+    }
+
     return [...byDay.entries()]
       .sort((a, b) => (a[0] < b[0] ? 1 : -1))
       .map(([day, items]) => {
-        const allExpenses = items.every((t) => t.kind === 'expense');
-        const net = items.reduce(
-          (s, t) => s + (t.kind === 'income' ? t.amount : -t.amount),
+        items.sort((a, b) => (a.at < b.at ? 1 : -1));
+        const txItems = items.filter(
+          (i): i is Extract<FeedItem, { type: 'tx' }> => i.type === 'tx',
+        );
+        const allExpenses =
+          txItems.length > 0 && txItems.every((i) => i.tx.kind === 'expense');
+        const net = txItems.reduce(
+          (s, i) => s + (i.tx.kind === 'income' ? i.tx.amount : -i.tx.amount),
           0,
         );
         return {
@@ -214,7 +275,7 @@ export default function TransactionsScreen() {
           net,
         };
       });
-  }, [txs.data, activeFilter]);
+  }, [txs.data, transfers.data, activeFilter]);
 
   function confirmDelete(tx: LocalTx) {
     Alert.alert(
@@ -439,7 +500,70 @@ export default function TransactionsScreen() {
                 </View>
 
                 {/* Transaction rows */}
-                {section.data.map((item) => {
+                {section.data.map((feed) => {
+                  // Transfer rows — neutral (trip-blue) money moves
+                  // between accounts. Tap routes to the transfers screen.
+                  if (feed.type === 'transfer') {
+                    const tr = feed.transfer;
+                    const fromName = tr.from_account_id
+                      ? accById.get(tr.from_account_id)?.name ?? '—'
+                      : '—';
+                    const toName = tr.to_account_id
+                      ? accById.get(tr.to_account_id)?.name ?? '—'
+                      : '—';
+                    const cross =
+                      tr.from_currency !== tr.to_currency ||
+                      tr.from_amount !== tr.to_amount;
+                    return (
+                      <Pressable
+                        key={feed.key}
+                        onPress={() => router.push('/(app)/transfers')}
+                        style={{
+                          paddingHorizontal: 14,
+                          paddingVertical: 12,
+                          flexDirection: 'row',
+                          alignItems: 'center',
+                          gap: 12,
+                          opacity: tr._sync_state !== 'clean' ? 0.7 : 1,
+                          borderTopWidth: 1,
+                          borderTopColor: c.border,
+                        }}
+                      >
+                        <View
+                          className="w-10 h-10 rounded-full items-center justify-center"
+                          style={{ backgroundColor: c.tripBg }}
+                        >
+                          <SwapIcon color={c.trip} size={18} />
+                        </View>
+                        <View className="flex-1 min-w-0">
+                          <Text
+                            numberOfLines={1}
+                            style={{ color: c.text, fontSize: 14, fontWeight: '500' }}
+                          >
+                            {fromName} → {toName}
+                          </Text>
+                          <Text style={{ color: c.textMuted, fontSize: 11, marginTop: 1 }}>
+                            {t('transfers.label', { defaultValue: 'โอนเงิน' })}
+                            {tr.note?.trim() ? ` · ${tr.note.trim()}` : ''}
+                            {' · '}
+                            {formatTime(tr.occurred_at)}
+                          </Text>
+                        </View>
+                        <View style={{ alignItems: 'flex-end' }}>
+                          <Text style={{ color: c.trip, fontSize: 14, fontWeight: '700' }}>
+                            {transferMoney(tr.from_amount, tr.from_currency)}
+                          </Text>
+                          {cross && (
+                            <Text style={{ color: c.textMuted, fontSize: 10, marginTop: 1 }}>
+                              → {transferMoney(tr.to_amount, tr.to_currency)}
+                            </Text>
+                          )}
+                        </View>
+                      </Pressable>
+                    );
+                  }
+
+                  const item = feed.tx;
                   const cat = item.category_id
                     ? catById.get(item.category_id)
                     : null;
@@ -451,7 +575,7 @@ export default function TransactionsScreen() {
                     : null;
                   return (
                     <Pressable
-                      key={item.id}
+                      key={feed.key}
                       onLongPress={() => setMenuTx(item)}
                       delayLongPress={300}
                       style={{
@@ -549,16 +673,26 @@ export default function TransactionsScreen() {
                           ) : null}
                         </Text>
                       </View>
-                      <Text
-                        style={{
-                          color: item.kind === 'income' ? c.income : c.text,
-                          fontSize: 14,
-                          fontWeight: '700',
-                        }}
-                      >
-                        {item.kind === 'income' ? '+' : '−'}฿
-                        {formatTHB(item.amount)}
-                      </Text>
+                      <View style={{ alignItems: 'flex-end' }}>
+                        <Text
+                          style={{
+                            color: item.kind === 'income' ? c.income : c.text,
+                            fontSize: 14,
+                            fontWeight: '700',
+                          }}
+                        >
+                          {item.kind === 'income' ? '+' : '−'}฿
+                          {formatTHB(item.amount)}
+                        </Text>
+                        {item.fx_currency && item.fx_amount != null ? (
+                          <Text
+                            style={{ color: c.textMuted, fontSize: 10, marginTop: 1 }}
+                          >
+                            {currencySymbol(item.fx_currency)}
+                            {formatTHB(item.fx_amount)}
+                          </Text>
+                        ) : null}
+                      </View>
                     </Pressable>
                   );
                 })}

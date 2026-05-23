@@ -21,6 +21,7 @@ import {
   useUpdateTransaction,
 } from '../../lib/queries/transactions-local';
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
+import { CURRENCIES, currencySymbol, useFxRate } from '../../lib/fx';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
@@ -59,14 +60,30 @@ export default function EditTransactionScreen() {
   const update = useUpdateTransaction();
   const c = useTheme().colors;
 
+  const home = ledger?.currency ?? 'THB';
   const [kind, setKind] = useState<'income' | 'expense'>('expense');
   const [amount, setAmount] = useState('');
   const [note, setNote] = useState('');
   const [categoryId, setCategoryId] = useState<string | null>(null);
   const [payment, setPayment] = useState<'cash' | 'transfer'>('cash');
   const [accountId, setAccountId] = useState<string | null>(null);
+  const [currency, setCurrency] = useState<string>(home);
   const [error, setError] = useState<string | null>(null);
   const [hydrated, setHydrated] = useState(false);
+
+  const foreign = currency !== home;
+  const { rate: fxRate, loading: rateLoading, error: rateError } = useFxRate(
+    currency,
+    home,
+  );
+  const currencyOptions = useMemo(
+    () => [home, ...CURRENCIES.filter((x) => x !== home)],
+    [home],
+  );
+  const homeEquiv =
+    foreign && amount && fxRate
+      ? Math.round(Number(amount.replace(/,/g, '')) * fxRate)
+      : null;
 
   // Once the tx loads, copy its fields into local state so the user
   // can edit. We only do this once (guarded by `hydrated`) so typing
@@ -76,13 +93,21 @@ export default function EditTransactionScreen() {
     const tx = txQuery.data;
     if (!tx) return;
     setKind(tx.kind);
-    setAmount(String(tx.amount));
+    // Foreign transactions edit in their foreign amount + currency; the
+    // home value is recomputed on save from the (re-fetched) rate.
+    if (tx.fx_currency && tx.fx_amount != null) {
+      setCurrency(tx.fx_currency);
+      setAmount(String(tx.fx_amount));
+    } else {
+      setCurrency(home);
+      setAmount(String(tx.amount));
+    }
     setNote(tx.note ?? '');
     setCategoryId(tx.category_id);
     setPayment(tx.payment_method ?? 'cash');
     setAccountId(tx.account_id ?? null);
     setHydrated(true);
-  }, [txQuery.data, hydrated]);
+  }, [txQuery.data, hydrated, home]);
 
   const visibleCats = useMemo(
     () =>
@@ -105,15 +130,38 @@ export default function EditTransactionScreen() {
       setError(t('quick.amountRequired'));
       return;
     }
+    // Recompute the home amount + fx trio. Switching back to home clears
+    // the trio (explicit nulls) so the row stops being multi-currency.
+    let homeAmount = value;
+    let fxCurrency: string | null = null;
+    let fxAmount: number | null = null;
+    let fxRateVal: number | null = null;
+    if (foreign) {
+      if (!fxRate) {
+        setError(
+          t('quick.fxUnavailable', {
+            defaultValue: 'ยังดึงเรตแลกเปลี่ยนไม่ได้ ลองใหม่อีกครั้ง',
+          }),
+        );
+        return;
+      }
+      fxCurrency = currency;
+      fxAmount = value;
+      fxRateVal = fxRate;
+      homeAmount = Math.round(value * fxRate * 100) / 100;
+    }
     try {
       await update.mutateAsync({
         id,
         kind,
-        amount: value,
+        amount: homeAmount,
         note: note.trim() || null,
         category_id: categoryId,
         account_id: accountId,
         payment_method: payment,
+        fx_currency: fxCurrency,
+        fx_amount: fxAmount,
+        fx_rate: fxRateVal,
       });
       close();
     } catch (e) {
@@ -217,7 +265,7 @@ export default function EditTransactionScreen() {
           </Text>
           <View className="flex-row items-baseline justify-center gap-1 mt-2">
             <Text style={{ color: '#FFFFFF', fontSize: 44, fontWeight: '700' }}>
-              ฿
+              {currencySymbol(currency)}
             </Text>
             <TextInput
               value={amount}
@@ -235,6 +283,68 @@ export default function EditTransactionScreen() {
               }}
             />
           </View>
+          {foreign && (
+            <Text
+              className="text-center"
+              style={{ color: 'rgba(255,255,255,0.9)', fontSize: 12, marginTop: 6 }}
+            >
+              {homeEquiv != null
+                ? `≈ ${currencySymbol(home)}${homeEquiv.toLocaleString('en-US')}`
+                : rateLoading
+                  ? t('quick.fxLoading', { defaultValue: 'กำลังดึงเรต…' })
+                  : rateError
+                    ? t('quick.fxError', { defaultValue: 'ดึงเรตไม่ได้' })
+                    : `1 ${currency} = ? ${home}`}
+            </Text>
+          )}
+        </View>
+
+        {/* Currency picker */}
+        <View>
+          <Text
+            style={{
+              color: c.text,
+              fontSize: 13,
+              fontWeight: '600',
+              marginBottom: 8,
+              marginLeft: 2,
+            }}
+          >
+            {t('quick.currency', { defaultValue: 'สกุลเงิน' })}
+          </Text>
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={{ gap: 8, paddingRight: 4 }}
+          >
+            {currencyOptions.map((cur) => {
+              const sel = currency === cur;
+              return (
+                <Pressable
+                  key={cur}
+                  onPress={() => setCurrency(cur)}
+                  style={{
+                    paddingHorizontal: 14,
+                    paddingVertical: 9,
+                    borderRadius: 999,
+                    backgroundColor: sel ? c.accent : c.card,
+                    borderWidth: 1,
+                    borderColor: sel ? c.accent : c.border,
+                  }}
+                >
+                  <Text
+                    style={{
+                      color: sel ? c.accentText : c.text,
+                      fontSize: 12,
+                      fontWeight: sel ? '800' : '600',
+                    }}
+                  >
+                    {currencySymbol(cur)} {cur}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
         </View>
 
         {/* Payment */}

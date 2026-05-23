@@ -1,0 +1,42 @@
+import { Redirect, Tabs } from 'expo-router';
+import { ActivityIndicator, View } from 'react-native';
+
+import { useAuth } from '../../providers/AuthProvider';
+import { AppTabBar } from '../../components/AppTabBar';
+
+/**
+ * Tab navigator for signed-in users. The visual layout is rendered by
+ * `AppTabBar` (see `ui/Dashboard.html` for the source design) — order is
+ * dashboard → transactions → quick (FAB) → insights → settings. The
+ * declaration order here must match the visual order because the tab
+ * bar reads `state.routes` by index.
+ *
+ * `ledgers` is intentionally hidden from the bar via `href: null`; it's
+ * still reachable programmatically (e.g. from the profile screen) but
+ * not pinned to the bottom nav.
+ */
+export default function AppLayout() {
+  const { session, loading } = useAuth();
+  if (loading) {
+    return (
+      <View style={{ flex: 1, alignItems: 'center', justifyContent: 'center' }}>
+        <ActivityIndicator />
+      </View>
+    );
+  }
+  if (!session) return <Redirect href="/(auth)/login" />;
+  return (
+    <Tabs
+      tabBar={(props) => <AppTabBar {...props} />}
+      screenOptions={{ headerShown: false }}
+    >
+      <Tabs.Screen name="dashboard" />
+      <Tabs.Screen name="transactions" />
+      <Tabs.Screen name="quick" />
+      <Tabs.Screen name="insights" />
+      <Tabs.Screen name="settings" />
+      <Tabs.Screen name="ledgers" options={{ href: null }} />
+      <Tabs.Screen name="onboarding-ledger" options={{ href: null }} />
+    </Tabs>
+  );
+}

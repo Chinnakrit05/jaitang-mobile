@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(ln -s /Users/devcat/Documents/jaitang-mobile/node_modules /Users/devcat/Documents/jaitang-mobile/.claude/worktrees/festive-goodall-991ca4/node_modules)",
+      "Bash(ps -p 20071 -o command=)",
+      "Bash(rm -f /tmp/expo-jaitang.log)",
+      "Bash(nohup npx expo start --port 8082)",
+      "Bash(echo \"PID=$!\")",
+      "Read(//tmp/**)",
+      "Bash(curl -s http://localhost:8082/)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:8082/)",
+      "Bash(ipconfig getifaddr *)"
+    ]
+  }
+}

@@ -79,6 +79,9 @@ export type UpdateTxInput = {
   trip_id?: string | null;
   payment_method?: 'cash' | 'transfer' | null;
   occurred_at?: string;
+  fx_currency?: string | null;
+  fx_amount?: number | null;
+  fx_rate?: number | null;
 };
 
 /**
@@ -135,6 +138,18 @@ export async function updateLocalTransaction(
   if (patch.occurred_at !== undefined) {
     fields.push('occurred_at = ?');
     values.push(patch.occurred_at);
+  }
+  if (patch.fx_currency !== undefined) {
+    fields.push('fx_currency = ?');
+    values.push(patch.fx_currency);
+  }
+  if (patch.fx_amount !== undefined) {
+    fields.push('fx_amount = ?');
+    values.push(patch.fx_amount);
+  }
+  if (patch.fx_rate !== undefined) {
+    fields.push('fx_rate = ?');
+    values.push(patch.fx_rate);
   }
   const now = new Date().toISOString();
   fields.push('updated_at = ?');
