@@ -18,6 +18,7 @@ import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import {
   useDeleteLedger,
+  useEnableLedgerSync,
   useLedgers,
   useUpdateLedger,
   type LedgerSummary,
@@ -97,8 +98,12 @@ export default function LedgersScreen() {
   const { ledger: active, setActiveLedger } = useActiveLedger();
   const update = useUpdateLedger();
   const del = useDeleteLedger();
+  const enableSync = useEnableLedgerSync();
   const createInvite = useCreateInvite();
   const acceptInvite = useAcceptInvite();
+  // Tracks which ledger is mid-promote so we can show a spinner on the right
+  // row (the enable-sync button and the share button can both trigger it).
+  const [promotingId, setPromotingId] = useState<string | null>(null);
 
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [shareState, setShareState] = useState<ShareState | null>(null);
@@ -162,7 +167,33 @@ export default function LedgersScreen() {
     );
   }
 
-  async function openShare(l: LedgerSummary) {
+  /** Enable cloud sync for a local-only ledger, with a confirm prompt. */
+  function confirmEnableSync(l: LedgerSummary) {
+    Alert.alert(
+      `เปิดซิงค์ "${l.name}" ขึ้นคลาวด์?`,
+      'ข้อมูลในสมุดนี้จะถูกอัปขึ้นคลาวด์เพื่อสำรองและใช้ข้ามอุปกรณ์ได้ จากนั้นจะซิงค์อัตโนมัติ (ตอนนี้ยังไม่รองรับการปิดซิงค์กลับ)',
+      [
+        { text: 'ยกเลิก', style: 'cancel' },
+        {
+          text: 'เปิดซิงค์',
+          onPress: async () => {
+            setPromotingId(l.id);
+            try {
+              await enableSync.mutateAsync(l.id);
+              Alert.alert('เปิดซิงค์แล้ว', `"${l.name}" สำรองขึ้นคลาวด์เรียบร้อย`);
+            } catch (e) {
+              console.error('enable sync failed:', e);
+              Alert.alert('เปิดซิงค์ไม่สำเร็จ', extractErrorMessage(e));
+            } finally {
+              setPromotingId(null);
+            }
+          },
+        },
+      ],
+    );
+  }
+
+  async function createInviteFor(l: LedgerSummary) {
     try {
       const result = await createInvite.mutateAsync({
         ledger_id: l.id,
@@ -180,6 +211,41 @@ export default function LedgersScreen() {
       console.error('create invite failed:', e);
       Alert.alert('สร้างรหัสเชิญไม่สำเร็จ', extractErrorMessage(e));
     }
+  }
+
+  /**
+   * Share a ledger. Sharing implies cloud, so a `local` ledger must be
+   * promoted first (LOCAL_FIRST_PLAN.md §4.5): prompt, promote, then issue
+   * the invite. A `synced` ledger goes straight to the invite.
+   */
+  function openShare(l: LedgerSummary) {
+    if (l.sync_mode === 'local') {
+      Alert.alert(
+        'ต้องเปิดซิงค์ก่อนแชร์',
+        `สมุด "${l.name}" ยังเก็บเฉพาะในเครื่อง การแชร์ต้องเปิดซิงค์ขึ้นคลาวด์ก่อน — ดำเนินการต่อ?`,
+        [
+          { text: 'ยกเลิก', style: 'cancel' },
+          {
+            text: 'เปิดซิงค์แล้วแชร์',
+            onPress: async () => {
+              setPromotingId(l.id);
+              try {
+                await enableSync.mutateAsync(l.id);
+              } catch (e) {
+                console.error('promote-before-share failed:', e);
+                Alert.alert('เปิดซิงค์ไม่สำเร็จ', extractErrorMessage(e));
+                setPromotingId(null);
+                return;
+              }
+              setPromotingId(null);
+              await createInviteFor(l);
+            },
+          },
+        ],
+      );
+      return;
+    }
+    void createInviteFor(l);
   }
 
   async function nativeShare() {
@@ -330,56 +396,107 @@ export default function LedgersScreen() {
                         {l.currency}
                         {isActive ? ' · 🟢 กำลังใช้' : ''}
                       </Text>
+                      <View className="flex-row mt-1.5">
+                        <View
+                          className="flex-row items-center gap-1 px-2 py-0.5 rounded-full"
+                          style={{
+                            backgroundColor:
+                              l.sync_mode === 'local' ? c.chip : c.incomeBg,
+                          }}
+                        >
+                          <Text style={{ fontSize: 9 }}>
+                            {l.sync_mode === 'local' ? '📵' : '☁️'}
+                          </Text>
+                          <Text
+                            style={{
+                              fontSize: 10,
+                              fontWeight: '600',
+                              color:
+                                l.sync_mode === 'local'
+                                  ? c.textSecondary
+                                  : c.income,
+                            }}
+                          >
+                            {l.sync_mode === 'local'
+                              ? 'เฉพาะในเครื่อง'
+                              : 'ซิงค์คลาวด์'}
+                          </Text>
+                        </View>
+                      </View>
                     </View>
                   </Pressable>
 
-                  {/* Action buttons row */}
+                  {/* Actions */}
                   <View
-                    className="flex-row gap-2 px-4 pb-3"
                     style={{
                       borderTopWidth: 1,
                       borderTopColor: c.border,
                       paddingTop: 10,
                     }}
                   >
-                    {isOwner && (
+                    {/* Enable-cloud-sync (local ledgers, owner only) */}
+                    {l.sync_mode === 'local' && isOwner && (
                       <Pressable
-                        onPress={() =>
-                          isEditing ? setEditForm(null) : openEdit(l)
-                        }
+                        onPress={() => confirmEnableSync(l)}
+                        disabled={promotingId === l.id}
+                        className="flex-row items-center justify-center gap-2 mx-4 mb-2 py-2 rounded-lg"
+                        style={{
+                          backgroundColor: c.accentSoft,
+                          opacity: promotingId === l.id ? 0.7 : 1,
+                        }}
+                      >
+                        {promotingId === l.id ? (
+                          <ActivityIndicator size="small" color={c.accent} />
+                        ) : (
+                          <Text
+                            style={{ color: c.accent, fontSize: 12, fontWeight: '700' }}
+                          >
+                            ☁️ เปิดซิงค์ขึ้นคลาวด์
+                          </Text>
+                        )}
+                      </Pressable>
+                    )}
+
+                    <View className="flex-row gap-2 px-4 pb-3">
+                      {isOwner && (
+                        <Pressable
+                          onPress={() =>
+                            isEditing ? setEditForm(null) : openEdit(l)
+                          }
+                          className="flex-1 py-2 rounded-lg items-center"
+                          style={{ backgroundColor: c.bg }}
+                        >
+                          <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
+                            ✏️ {isEditing ? 'ปิด' : 'แก้ไข'}
+                          </Text>
+                        </Pressable>
+                      )}
+                      <Pressable
+                        onPress={() => openShare(l)}
+                        disabled={createInvite.isPending || promotingId === l.id}
                         className="flex-1 py-2 rounded-lg items-center"
                         style={{ backgroundColor: c.bg }}
                       >
-                        <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
-                          ✏️ {isEditing ? 'ปิด' : 'แก้ไข'}
-                        </Text>
+                        {createInvite.isPending || promotingId === l.id ? (
+                          <ActivityIndicator size="small" color={c.accent} />
+                        ) : (
+                          <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
+                            📤 แชร์
+                          </Text>
+                        )}
                       </Pressable>
-                    )}
-                    <Pressable
-                      onPress={() => openShare(l)}
-                      disabled={createInvite.isPending}
-                      className="flex-1 py-2 rounded-lg items-center"
-                      style={{ backgroundColor: c.bg }}
-                    >
-                      {createInvite.isPending ? (
-                        <ActivityIndicator size="small" color={c.accent} />
-                      ) : (
-                        <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
-                          📤 แชร์
-                        </Text>
+                      {isOwner && (
+                        <Pressable
+                          onPress={() => confirmDelete(l)}
+                          className="flex-1 py-2 rounded-lg items-center"
+                          style={{ backgroundColor: 'rgba(217, 133, 86, 0.12)' }}
+                        >
+                          <Text style={{ color: c.expense, fontSize: 12, fontWeight: '600' }}>
+                            🗑 ลบ
+                          </Text>
+                        </Pressable>
                       )}
-                    </Pressable>
-                    {isOwner && (
-                      <Pressable
-                        onPress={() => confirmDelete(l)}
-                        className="flex-1 py-2 rounded-lg items-center"
-                        style={{ backgroundColor: 'rgba(217, 133, 86, 0.12)' }}
-                      >
-                        <Text style={{ color: c.expense, fontSize: 12, fontWeight: '600' }}>
-                          🗑 ลบ
-                        </Text>
-                      </Pressable>
-                    )}
+                    </View>
                   </View>
 
                   {/* Inline edit form */}

@@ -9,8 +9,10 @@ import {
 } from '../db/ledgers';
 import { seedDefaultCategoriesLocal } from '../db/categories';
 import { pullLedgers } from '../sync/ledgers';
+import { promoteLedger } from '../sync/promote';
 import { supabase } from '../supabase/client';
 import { useAuth } from '../../providers/AuthProvider';
+import { useSync } from '../../providers/SyncProvider';
 
 export type LedgerSummary = {
   id: string;
@@ -20,6 +22,8 @@ export type LedgerSummary = {
   currency: string;
   is_personal: boolean;
   role: 'owner' | 'editor' | 'viewer';
+  // Local-first: 'local' = on-device only (no cloud backup) until promoted.
+  sync_mode: 'local' | 'synced';
 };
 
 /**
@@ -43,6 +47,7 @@ export function useLedgers() {
         currency: r.currency,
         is_personal: r.is_personal === 1,
         role: r.role,
+        sync_mode: r.sync_mode,
       }));
     },
   });
@@ -158,6 +163,55 @@ export function useCreateLedger() {
       // sees the new row instead of stale (empty) cache.
       await qc.refetchQueries({ queryKey: ['local-ledgers'] });
       return newId;
+    },
+  });
+}
+
+/**
+ * Enable cloud sync for a `local` ledger (Local-first Phase 3). Uploads the
+ * ledger + every child entity in one transactional RPC, flips it to `synced`,
+ * then kicks a normal sync pass. This is also the path Share should call
+ * before inviting someone (sharing implies cloud — see LOCAL_FIRST_PLAN.md).
+ *
+ * No-ops gracefully if the ledger is already `synced`. Idempotent/resumable:
+ * the underlying RPC upserts by id, so a retry after a mid-flight failure is
+ * safe.
+ */
+export function useEnableLedgerSync() {
+  const qc = useQueryClient();
+  const { syncNow } = useSync();
+  return useMutation({
+    mutationFn: async (ledgerId: string) => {
+      const existing = await getLocalLedger(ledgerId);
+      if (!existing) throw new Error('Ledger not found');
+      if (existing.sync_mode === 'synced') return; // already in the cloud
+      await promoteLedger(ledgerId);
+    },
+    onSuccess: async () => {
+      // The ledger (and its children) are now cloud-backed. Refresh every
+      // local-* cache the promoted data feeds, and kick a sync so the loop
+      // immediately starts treating this ledger as synced.
+      await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
+      await qc.refetchQueries({ queryKey: ['local-ledgers'] });
+      for (const key of [
+        'local-categories',
+        'local-accounts',
+        'local-budgets',
+        'local-recurring',
+        'local-trips',
+        'local-transfers',
+        'local-goals',
+        'goal-progress',
+        'local-goal-contributions',
+        'local-loans',
+        'loan-repaid',
+        'local-loan-repayments',
+        'local-tx',
+        'account-balances',
+      ]) {
+        await qc.invalidateQueries({ queryKey: [key] });
+      }
+      void syncNow();
     },
   });
 }
