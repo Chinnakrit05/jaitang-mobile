@@ -25,6 +25,7 @@ import {
 } from '../../lib/queries/ledgers';
 import { useAcceptInvite, useCreateInvite } from '../../lib/queries/invites';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
+import { exportLedger } from '../../lib/backup/export';
 
 /**
  * Ledger management — switcher + CRUD + share/accept invite.
@@ -104,6 +105,19 @@ export default function LedgersScreen() {
   // Tracks which ledger is mid-promote so we can show a spinner on the right
   // row (the enable-sync button and the share button can both trigger it).
   const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [exportingId, setExportingId] = useState<string | null>(null);
+
+  async function handleExport(l: LedgerSummary) {
+    setExportingId(l.id);
+    try {
+      await exportLedger(l.id, l.name);
+    } catch (e) {
+      console.error('export ledger failed:', e);
+      Alert.alert('ส่งออกไม่สำเร็จ', extractErrorMessage(e));
+    } finally {
+      setExportingId(null);
+    }
+  }
 
   const [editForm, setEditForm] = useState<EditForm | null>(null);
   const [shareState, setShareState] = useState<ShareState | null>(null);
@@ -482,6 +496,20 @@ export default function LedgersScreen() {
                         ) : (
                           <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
                             📤 แชร์
+                          </Text>
+                        )}
+                      </Pressable>
+                      <Pressable
+                        onPress={() => handleExport(l)}
+                        disabled={exportingId === l.id}
+                        className="flex-1 py-2 rounded-lg items-center"
+                        style={{ backgroundColor: c.bg }}
+                      >
+                        {exportingId === l.id ? (
+                          <ActivityIndicator size="small" color={c.accent} />
+                        ) : (
+                          <Text style={{ color: c.text, fontSize: 12, fontWeight: '600' }}>
+                            💾 สำรอง
                           </Text>
                         )}
                       </Pressable>

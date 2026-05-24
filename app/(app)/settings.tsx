@@ -1,9 +1,13 @@
+import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Pressable, ScrollView, Text, View } from 'react-native';
+import { ActivityIndicator, Alert, Pressable, ScrollView, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
+import { useQueryClient } from '@tanstack/react-query';
 
 import { useAuth } from '../../providers/AuthProvider';
+import { exportAllLedgers } from '../../lib/backup/export';
+import { pickAndImportBackup } from '../../lib/backup/import';
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
 import {
@@ -43,6 +47,64 @@ export default function SettingsScreen() {
   const { mode, setMode, oled, setOled, isDark, palette, setPalette } = useTheme();
   const c = useTheme().colors;
   const locale = currentLocale();
+  const qc = useQueryClient();
+  const [busy, setBusy] = useState<null | 'export' | 'import'>(null);
+
+  async function handleExport() {
+    setBusy('export');
+    try {
+      const r = await exportAllLedgers();
+      Alert.alert('สำรองข้อมูลแล้ว', `ส่งออก ${r.count} สมุดให้คุณบันทึกไว้`);
+    } catch (e) {
+      console.error('export failed:', e);
+      Alert.alert('สำรองข้อมูลไม่สำเร็จ', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function handleImport() {
+    const userId = session?.user.id;
+    if (!userId) {
+      Alert.alert('กรุณาเข้าสู่ระบบก่อน');
+      return;
+    }
+    setBusy('import');
+    try {
+      const result = await pickAndImportBackup(userId);
+      if (!result) {
+        setBusy(null);
+        return; // user cancelled the picker
+      }
+      // Refresh every local-* cache that could now have new rows.
+      for (const key of [
+        'local-ledgers',
+        'local-categories',
+        'local-accounts',
+        'local-budgets',
+        'local-recurring',
+        'local-trips',
+        'local-transfers',
+        'local-goals',
+        'local-goal-contributions',
+        'local-loans',
+        'local-loan-repayments',
+        'local-tx',
+        'account-balances',
+      ]) {
+        await qc.invalidateQueries({ queryKey: [key] });
+      }
+      Alert.alert(
+        'นำเข้าข้อมูลแล้ว',
+        `เพิ่มสมุด ${result.ledgersImported} เล่ม (${result.rowsImported} รายการ) ในเครื่อง`,
+      );
+    } catch (e) {
+      console.error('import failed:', e);
+      Alert.alert('นำเข้าไม่สำเร็จ', e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  }
 
   const ledgerMeta = ledger
     ? `${ledger.is_personal ? t('ledgers.personal') : t('ledgers.shared')} · ${ledger.role} · ${ledger.currency}`
@@ -237,6 +299,28 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        <Section title="สำรอง / กู้คืนข้อมูล" icon="archive" colors={c}>
+          <BackupRow
+            icon="download"
+            title="ส่งออก (สำรองข้อมูล)"
+            subtitle="บันทึกสมุดทั้งหมดเป็นไฟล์ JSON เก็บไว้กันลืม"
+            colors={c}
+            busy={busy === 'export'}
+            disabled={busy !== null}
+            onPress={handleExport}
+          />
+          <BackupRow
+            icon="import"
+            title="นำเข้าจากไฟล์ backup"
+            subtitle="สร้างสมุดใหม่ในเครื่องจากไฟล์ที่เคยส่งออก"
+            colors={c}
+            busy={busy === 'import'}
+            disabled={busy !== null}
+            onPress={handleImport}
+            isLast
+          />
+        </Section>
+
         <Pressable
           onPress={() => signOut()}
           className="rounded-2xl p-4 flex-row items-center gap-3"
@@ -328,6 +412,54 @@ function SettingRow({
         </Text>
       </View>
       <Text style={{ color: colors.textMuted, fontSize: 22 }}>›</Text>
+    </Pressable>
+  );
+}
+
+function BackupRow({
+  icon,
+  title,
+  subtitle,
+  colors,
+  busy,
+  disabled,
+  onPress,
+  isLast,
+}: {
+  icon: IconName;
+  title: string;
+  subtitle: string;
+  colors: Colors;
+  busy: boolean;
+  disabled: boolean;
+  onPress: () => void;
+  isLast?: boolean;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      className="flex-row items-center gap-3 px-4 py-3.5"
+      style={{
+        borderBottomWidth: isLast ? 0 : 1,
+        borderBottomColor: colors.border,
+        opacity: disabled && !busy ? 0.5 : 1,
+      }}
+    >
+      <View
+        className="w-10 h-10 rounded-full items-center justify-center"
+        style={{ backgroundColor: colors.chip }}
+      >
+        {busy ? <ActivityIndicator size="small" color={colors.accent} /> : <JtIcon name={icon} size={20} />}
+      </View>
+      <View className="flex-1 min-w-0">
+        <Text numberOfLines={1} style={{ color: colors.text, fontSize: 14, fontWeight: '700' }}>
+          {title}
+        </Text>
+        <Text numberOfLines={2} style={{ color: colors.textSecondary, fontSize: 11, marginTop: 2 }}>
+          {subtitle}
+        </Text>
+      </View>
     </Pressable>
   );
 }
