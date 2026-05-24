@@ -1,8 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listLocalTrips } from '../db/trips';
+import {
+  createLocalTrip,
+  deleteLocalTrip,
+  listLocalTrips,
+  setLocalTripArchived,
+  updateLocalTrip,
+} from '../db/trips';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerTrips } from '../sync/trips';
 import { supabase } from '../supabase/client';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Trip CRUD + queries.
@@ -63,20 +76,34 @@ export function useCreateTrip() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: NewTripInput) => {
-      const { data, error } = await supabase.rpc('create_trip', {
-        p_ledger_id: input.ledger_id,
-        p_name: input.name,
-        p_icon: input.icon ?? null,
-        p_color: input.color ?? null,
-        p_currency: input.currency ?? null,
-        p_starts_at: input.starts_at ?? null,
-        p_ends_at: input.ends_at ?? null,
-      });
-      if (error) throw error;
-      await refreshLedgerTrips(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        id = await createLocalTrip({
+          ledger_id: input.ledger_id,
+          name: input.name,
+          icon: input.icon ?? null,
+          color: input.color ?? null,
+          currency: input.currency ?? null,
+          starts_at: input.starts_at ?? null,
+          ends_at: input.ends_at ?? null,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('create_trip', {
+          p_ledger_id: input.ledger_id,
+          p_name: input.name,
+          p_icon: input.icon ?? null,
+          p_color: input.color ?? null,
+          p_currency: input.currency ?? null,
+          p_starts_at: input.starts_at ?? null,
+          p_ends_at: input.ends_at ?? null,
+        });
+        if (error) throw error;
+        await refreshLedgerTrips(input.ledger_id);
+        id = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-trips'] });
       await qc.refetchQueries({ queryKey: ['local-trips'] });
-      return data as string;
+      return id;
     },
   });
 }
@@ -96,17 +123,28 @@ export function useUpdateTrip() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateTripInput) => {
-      const { error } = await supabase.rpc('update_trip', {
-        p_id: input.id,
-        p_name: input.name,
-        p_icon: input.icon,
-        p_color: input.color,
-        p_currency: input.currency,
-        p_starts_at: input.starts_at,
-        p_ends_at: input.ends_at,
-      });
-      if (error) throw error;
-      await refreshLedgerTrips(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalTrip(input.id, {
+          name: input.name,
+          icon: input.icon,
+          color: input.color,
+          currency: input.currency,
+          starts_at: input.starts_at,
+          ends_at: input.ends_at,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_trip', {
+          p_id: input.id,
+          p_name: input.name,
+          p_icon: input.icon,
+          p_color: input.color,
+          p_currency: input.currency,
+          p_starts_at: input.starts_at,
+          p_ends_at: input.ends_at,
+        });
+        if (error) throw error;
+        await refreshLedgerTrips(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-trips'] });
       await qc.refetchQueries({ queryKey: ['local-trips'] });
     },
@@ -121,12 +159,16 @@ export function useSetTripArchived() {
       ledger_id: string;
       archived: boolean;
     }) => {
-      const { error } = await supabase.rpc('set_trip_archived', {
-        p_id: input.id,
-        p_archived: input.archived,
-      });
-      if (error) throw error;
-      await refreshLedgerTrips(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await setLocalTripArchived(input.id, input.archived);
+      } else {
+        const { error } = await supabase.rpc('set_trip_archived', {
+          p_id: input.id,
+          p_archived: input.archived,
+        });
+        if (error) throw error;
+        await refreshLedgerTrips(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-trips'] });
       await qc.refetchQueries({ queryKey: ['local-trips'] });
     },
@@ -137,14 +179,17 @@ export function useDeleteTrip() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_trip', { p_id: input.id });
-      if (error) throw error;
-      await refreshLedgerTrips(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalTrip(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_trip', { p_id: input.id });
+        if (error) throw error;
+        await refreshLedgerTrips(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-trips'] });
       await qc.refetchQueries({ queryKey: ['local-trips'] });
-      // Transactions that referenced this trip now have trip_id = NULL
-      // server-side; invalidate so the local tx cache picks that up on
-      // the next pull tick.
+      // Transactions that referenced this trip now have trip_id = NULL;
+      // invalidate so the local tx cache reflects it.
       await qc.invalidateQueries({ queryKey: ['local-tx'] });
     },
   });

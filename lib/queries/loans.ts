@@ -1,12 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  addLocalLoanRepayment,
+  createLocalLoan,
+  deleteLocalLoan,
+  deleteLocalLoanRepayment,
   getLocalLoanRepaidTotals,
   listLocalLoanRepayments,
   listLocalLoans,
+  setLocalLoanStatus,
+  updateLocalLoan,
 } from '../db/loans';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerLoans } from '../sync/loans';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../../providers/AuthProvider';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Loans CRUD + repayment log.
@@ -107,22 +121,41 @@ export type NewLoanInput = {
 
 export function useCreateLoan() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: NewLoanInput) => {
-      const { data, error } = await supabase.rpc('create_loan', {
-        p_kind: input.kind,
-        p_counterparty: input.counterparty,
-        p_principal: input.principal,
-        p_currency: input.currency,
-        p_started_at: input.started_at ?? null,
-        p_due_date: input.due_date ?? null,
-        p_note: input.note ?? null,
-        p_ledger_id: input.ledger_id,
-      });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        id = await createLocalLoan({
+          ledger_id: input.ledger_id,
+          user_id: userId,
+          kind: input.kind,
+          counterparty: input.counterparty,
+          principal: input.principal,
+          currency: input.currency,
+          started_at: input.started_at ?? null,
+          due_date: input.due_date ?? null,
+          note: input.note ?? null,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('create_loan', {
+          p_kind: input.kind,
+          p_counterparty: input.counterparty,
+          p_principal: input.principal,
+          p_currency: input.currency,
+          p_started_at: input.started_at ?? null,
+          p_due_date: input.due_date ?? null,
+          p_note: input.note ?? null,
+          p_ledger_id: input.ledger_id,
+        });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+        id = data as string;
+      }
       await invalidateLoans(qc);
-      return data as string;
+      return id;
     },
   });
 }
@@ -143,18 +176,30 @@ export function useUpdateLoan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateLoanInput) => {
-      const { error } = await supabase.rpc('update_loan', {
-        p_id: input.id,
-        p_kind: input.kind,
-        p_counterparty: input.counterparty,
-        p_principal: input.principal,
-        p_currency: input.currency,
-        p_started_at: input.started_at,
-        p_due_date: input.due_date,
-        p_note: input.note,
-      });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalLoan(input.id, {
+          kind: input.kind,
+          counterparty: input.counterparty,
+          principal: input.principal,
+          currency: input.currency,
+          started_at: input.started_at,
+          due_date: input.due_date,
+          note: input.note,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_loan', {
+          p_id: input.id,
+          p_kind: input.kind,
+          p_counterparty: input.counterparty,
+          p_principal: input.principal,
+          p_currency: input.currency,
+          p_started_at: input.started_at,
+          p_due_date: input.due_date,
+          p_note: input.note,
+        });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+      }
       await invalidateLoans(qc);
     },
   });
@@ -168,12 +213,16 @@ export function useSetLoanStatus() {
       ledger_id: string;
       status: 'open' | 'settled';
     }) => {
-      const { error } = await supabase.rpc('set_loan_status', {
-        p_id: input.id,
-        p_status: input.status,
-      });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await setLocalLoanStatus(input.id, input.status);
+      } else {
+        const { error } = await supabase.rpc('set_loan_status', {
+          p_id: input.id,
+          p_status: input.status,
+        });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+      }
       await invalidateLoans(qc);
     },
   });
@@ -183,9 +232,13 @@ export function useDeleteLoan() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_loan', { p_id: input.id });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalLoan(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_loan', { p_id: input.id });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+      }
       await invalidateLoans(qc);
     },
   });
@@ -201,16 +254,28 @@ export function useAddLoanRepayment() {
       note?: string | null;
       occurred_at?: string;
     }) => {
-      const { data, error } = await supabase.rpc('add_loan_repayment', {
-        p_loan_id: input.loan_id,
-        p_amount: input.amount,
-        p_occurred_at: input.occurred_at ?? new Date().toISOString(),
-        p_note: input.note ?? null,
-      });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        id = await addLocalLoanRepayment({
+          loan_id: input.loan_id,
+          ledger_id: input.ledger_id,
+          amount: input.amount,
+          note: input.note ?? null,
+          occurred_at: input.occurred_at,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('add_loan_repayment', {
+          p_loan_id: input.loan_id,
+          p_amount: input.amount,
+          p_occurred_at: input.occurred_at ?? new Date().toISOString(),
+          p_note: input.note ?? null,
+        });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+        id = data as string;
+      }
       await invalidateLoans(qc);
-      return data as string;
+      return id;
     },
   });
 }
@@ -219,11 +284,15 @@ export function useDeleteLoanRepayment() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_loan_repayment', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerLoans(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalLoanRepayment(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_loan_repayment', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerLoans(input.ledger_id);
+      }
       await invalidateLoans(qc);
     },
   });

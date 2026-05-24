@@ -18,7 +18,7 @@ import type { SQLiteDatabase } from 'expo-sqlite';
  * until a phase wires up the push paths).
  */
 
-const SCHEMA_VERSION = 8;
+const SCHEMA_VERSION = 9;
 
 const STATEMENTS = [
   // Bookkeeping for the sync engine itself.
@@ -89,6 +89,11 @@ const STATEMENTS = [
   // sources: the row's own `owner_id` (→ 'owner') or the matching
   // `ledger_members.role`. The pull resolves it before insert so callers
   // don't have to join again.
+  // `sync_mode` ('local' | 'synced') drives local-first behavior (see
+  // LOCAL_FIRST_PLAN.md). 'local' ledgers are never pushed/pulled — they
+  // live only on this device until the user enables cloud sync (or shares),
+  // at which point they're promoted to 'synced'. `promoted_at` records when
+  // that happened. Anything pulled from the cloud is, by definition, 'synced'.
   `CREATE TABLE IF NOT EXISTS ledgers (
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
@@ -101,6 +106,8 @@ const STATEMENTS = [
     created_at TEXT,
     updated_at TEXT,
     deleted_at TEXT,
+    sync_mode TEXT NOT NULL DEFAULT 'local',
+    promoted_at TEXT,
     _sync_state TEXT NOT NULL DEFAULT 'clean'
   )`,
   `CREATE INDEX IF NOT EXISTS idx_ledger_active ON ledgers(is_personal DESC, created_at) WHERE deleted_at IS NULL`,
@@ -282,8 +289,37 @@ export async function migrate(db: SQLiteDatabase): Promise<void> {
   for (const sql of STATEMENTS) {
     await db.execAsync(sql);
   }
+  // `CREATE TABLE IF NOT EXISTS` can't add columns to a table that already
+  // exists, so additive column changes need explicit, idempotent ALTERs.
+  await runColumnMigrations(db);
   await db.runAsync(
     `INSERT OR REPLACE INTO sync_state (key, value) VALUES (?, ?)`,
     ['schema_version', String(SCHEMA_VERSION)],
   );
+}
+
+/**
+ * Idempotent additive migrations for installs created before a column
+ * existed. Each block is guarded by a `PRAGMA table_info` check so it runs
+ * at most once (the open where the column is first missing) — fresh installs
+ * already have the columns from the CREATE TABLE above and skip these.
+ */
+async function runColumnMigrations(db: SQLiteDatabase): Promise<void> {
+  // v9 — per-ledger sync mode (local-first).
+  const ledgerCols = await db.getAllAsync<{ name: string }>(
+    `PRAGMA table_info(ledgers)`,
+  );
+  const ledgerHas = (name: string) => ledgerCols.some((c) => c.name === name);
+  if (!ledgerHas('sync_mode')) {
+    await db.execAsync(
+      `ALTER TABLE ledgers ADD COLUMN sync_mode TEXT NOT NULL DEFAULT 'local'`,
+    );
+    // Every ledger that existed before local-first came from the cloud, so
+    // it's already synced. This runs only on the upgrade open (the column
+    // was just added), never again.
+    await db.runAsync(`UPDATE ledgers SET sync_mode = 'synced'`);
+  }
+  if (!ledgerHas('promoted_at')) {
+    await db.execAsync(`ALTER TABLE ledgers ADD COLUMN promoted_at TEXT`);
+  }
 }

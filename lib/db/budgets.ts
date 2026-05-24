@@ -3,6 +3,62 @@ import type { LocalBudget } from '../sync/budgets';
 
 export type LocalBudgetRow = LocalBudget;
 
+function randomUuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+// ── Local-first writes (used for `local` ledgers; see LOCAL_FIRST_PLAN.md) ──
+//
+// A `local` ledger's budgets live only on-device with `pending_*` state until
+// the ledger is promoted. Delete reuses the hard-delete `deleteLocalBudget`
+// below: every local row is `pending_create` (never pushed), so there's no
+// server tombstone to keep — exactly what the synced mirror-refresh also wants.
+
+/**
+ * Local-first upsert mirroring the server `upsert_budget`: one active budget
+ * per (ledger_id, category_id, period). Updates the existing row's amount if
+ * present, otherwise inserts a new row with a client UUID and `pending_create`.
+ * Returns the budget id.
+ */
+export async function createOrUpdateLocalBudget(input: {
+  ledger_id: string;
+  category_id: string;
+  amount: number;
+  period: string;
+}): Promise<string> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const existing = await db.getFirstAsync<{ id: string }>(
+    `SELECT id FROM budgets
+     WHERE ledger_id=? AND category_id=? AND period=? AND deleted_at IS NULL`,
+    [input.ledger_id, input.category_id, input.period],
+  );
+  if (existing) {
+    await db.runAsync(
+      `UPDATE budgets
+         SET amount=?, updated_at=?,
+             _sync_state=CASE WHEN _sync_state='pending_create'
+                              THEN 'pending_create' ELSE 'pending_update' END
+       WHERE id=?`,
+      [input.amount, now, existing.id],
+    );
+    return existing.id;
+  }
+  const id = randomUuid();
+  await db.runAsync(
+    `INSERT INTO budgets (
+      id, ledger_id, category_id, amount, period,
+      created_at, updated_at, deleted_at, _sync_state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, 'pending_create')`,
+    [id, input.ledger_id, input.category_id, input.amount, input.period, now, now],
+  );
+  return id;
+}
+
 export async function upsertLocalBudget(row: {
   id: string;
   ledger_id: string;

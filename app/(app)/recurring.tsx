@@ -1,7 +1,10 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
   Pressable,
   ScrollView,
   Text,
@@ -9,8 +12,9 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { router } from 'expo-router';
+import { router, useFocusEffect } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useTheme } from '../../providers/ThemeProvider';
@@ -26,6 +30,7 @@ import {
   type RecurringRule,
 } from '../../lib/queries/recurring';
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
+import { getFiled, isFiled, type FiledMarks } from '../../lib/recurring-filed';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
@@ -65,6 +70,11 @@ const PERIOD_SHORT: Record<Period, string> = {
   monthly: 'ทุกเดือน',
   yearly: 'ทุกปี',
 };
+
+// Shared with the monthly report screen: a variable bill filled there (per
+// `${ruleId}|YYYY-MM`) shouldn't still nag as "รอใส่ราคา" here. Read-only
+// on this screen — the report owns writing these markers.
+const FILED_KEY = 'jt-recurring-filed';
 
 function formatThaiDate(iso: string) {
   try {
@@ -157,6 +167,33 @@ export default function RecurringScreen() {
     Record<string, string>
   >({});
 
+  // "Filed this month" markers written by the report screen. Reloaded each
+  // time this screen gains focus so a bill the user filled over in the
+  // report immediately stops nagging here.
+  const [filedMarks, setFiledMarks] = useState<FiledMarks>({});
+  useFocusEffect(
+    useCallback(() => {
+      let active = true;
+      AsyncStorage.getItem(FILED_KEY)
+        .then((raw) => {
+          if (!active) return;
+          if (!raw) {
+            setFiledMarks({});
+            return;
+          }
+          try {
+            setFiledMarks(JSON.parse(raw));
+          } catch {
+            setFiledMarks({});
+          }
+        })
+        .catch(() => {});
+      return () => {
+        active = false;
+      };
+    }, []),
+  );
+
   const catById = useMemo(
     () => new Map((cats.data ?? []).map((cat) => [cat.id, cat])),
     [cats.data],
@@ -166,16 +203,19 @@ export default function RecurringScreen() {
 
   const { fixedDue, pendingBills } = useMemo(() => {
     const all = rules.data ?? [];
+    const today = new Date();
     const fixedDue: RecurringRule[] = [];
     const pendingBills: RecurringRule[] = [];
     for (const r of all) {
       if (!r.active) continue;
       if (r.next_run_at > now) continue;
-      if (r.amount == null) pendingBills.push(r);
-      else fixedDue.push(r);
+      if (r.amount == null) {
+        // Already filled this month over in the report → don't nag here.
+        if (!isFiled(filedMarks, r.id, today)) pendingBills.push(r);
+      } else fixedDue.push(r);
     }
     return { fixedDue, pendingBills };
-  }, [rules.data, now]);
+  }, [rules.data, now, filedMarks]);
 
   function openCreate() {
     setError(null);
@@ -375,23 +415,17 @@ export default function RecurringScreen() {
             รายการประจำ
           </Text>
           <Pressable
-            onPress={form ? closeForm : openCreate}
+            onPress={openCreate}
             style={{
               width: 36,
               height: 36,
               borderRadius: 18,
               alignItems: 'center',
               justifyContent: 'center',
-              backgroundColor: form ? c.chip : c.accent,
+              backgroundColor: c.accent,
             }}
           >
-            {form ? (
-              <Text style={{ color: c.text, fontSize: 14, fontWeight: '700' }}>
-                ✕
-              </Text>
-            ) : (
-              <PlusIcon color={c.chipActiveText} size={18} />
-            )}
+            <PlusIcon color={c.chipActiveText} size={18} />
           </Pressable>
         </View>
 
@@ -524,15 +558,61 @@ export default function RecurringScreen() {
           </Pressable>
         )}
 
-        {/* Form */}
-        {form && (
-          <View
-            className="rounded-2xl p-4"
-            style={{ backgroundColor: c.card, gap: 12 }}
-          >
-            <Text style={{ color: c.text, fontSize: 14, fontWeight: '700' }}>
-              {form.mode === 'create' ? 'รายการประจำใหม่' : 'แก้ไขรายการประจำ'}
-            </Text>
+        {/* Form modal — bottom sheet. Editing a row opens an overlay from
+            the bottom instead of an inline form pushed to the top of the
+            page (which was hard to use from rows lower in the list). */}
+        <Modal
+          transparent
+          visible={!!form}
+          animationType="slide"
+          onRequestClose={closeForm}
+        >
+          {form && (
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+              style={{ flex: 1 }}
+            >
+              <Pressable
+                onPress={closeForm}
+                style={{
+                  flex: 1,
+                  backgroundColor: 'rgba(0,0,0,0.45)',
+                  justifyContent: 'flex-end',
+                }}
+              >
+                <Pressable
+                  onPress={() => {}}
+                  style={{
+                    backgroundColor: c.card,
+                    borderTopLeftRadius: 28,
+                    borderTopRightRadius: 28,
+                    paddingTop: 8,
+                    maxHeight: '90%',
+                  }}
+                >
+                  <View
+                    style={{
+                      alignSelf: 'center',
+                      width: 40,
+                      height: 4,
+                      borderRadius: 2,
+                      backgroundColor: c.border,
+                      marginBottom: 4,
+                    }}
+                  />
+                  <ScrollView
+                    contentContainerStyle={{
+                      paddingHorizontal: 16,
+                      paddingTop: 8,
+                      paddingBottom: 28,
+                      gap: 12,
+                    }}
+                    keyboardShouldPersistTaps="handled"
+                    showsVerticalScrollIndicator={false}
+                  >
+                    <Text style={{ color: c.text, fontSize: 16, fontWeight: '800' }}>
+                      {form.mode === 'create' ? 'รายการประจำใหม่' : 'แก้ไขรายการประจำ'}
+                    </Text>
 
             {/* Kind toggle */}
             <View
@@ -767,8 +847,12 @@ export default function RecurringScreen() {
                 )}
               </Pressable>
             </View>
-          </View>
-        )}
+                  </ScrollView>
+                </Pressable>
+              </Pressable>
+            </KeyboardAvoidingView>
+          )}
+        </Modal>
 
         {/* List */}
         {rules.isLoading ? (
@@ -806,6 +890,10 @@ export default function RecurringScreen() {
               const cat = rule.category_id ? catById.get(rule.category_id) : null;
               const isVariable = rule.amount == null;
               const isDue = rule.active && rule.next_run_at <= now;
+              // Variable bill already filled this month via the report.
+              const filedMark = isVariable
+                ? getFiled(filedMarks, rule.id, new Date())
+                : undefined;
               return (
                 <Pressable
                   key={rule.id}
@@ -846,14 +934,22 @@ export default function RecurringScreen() {
                     >
                       {PERIOD_SHORT[rule.period]}
                       {!rule.active ? ' · หยุดอยู่' : ''}
-                      {isVariable ? ' · 📝 บิลรอกรอก' : ''}
-                      {isDue && !isVariable ? ' · ' : ' · ครั้งถัดไป '}
-                      {isDue && !isVariable ? (
-                        <Text style={{ color: c.accent, fontWeight: '700' }}>
-                          ถึงกำหนดแล้ว
+                      {filedMark ? (
+                        <Text style={{ color: c.income, fontWeight: '700' }}>
+                          {' · ✓ ใส่แล้วเดือนนี้'}
                         </Text>
                       ) : (
-                        formatThaiDate(rule.next_run_at)
+                        <>
+                          {isVariable ? ' · 📝 บิลรอกรอก' : ''}
+                          {isDue && !isVariable ? ' · ' : ' · ครั้งถัดไป '}
+                          {isDue && !isVariable ? (
+                            <Text style={{ color: c.accent, fontWeight: '700' }}>
+                              ถึงกำหนดแล้ว
+                            </Text>
+                          ) : (
+                            formatThaiDate(rule.next_run_at)
+                          )}
+                        </>
                       )}
                     </Text>
                   </View>
@@ -865,9 +961,16 @@ export default function RecurringScreen() {
                     }}
                   >
                     {isVariable ? (
-                      <Text style={{ color: c.textMuted, fontStyle: 'italic' }}>
-                        ฿—
-                      </Text>
+                      filedMark ? (
+                        <>
+                          {rule.kind === 'income' ? '+' : '−'}฿
+                          {formatTHB(filedMark.amount)}
+                        </>
+                      ) : (
+                        <Text style={{ color: c.textMuted, fontStyle: 'italic' }}>
+                          ฿—
+                        </Text>
+                      )
                     ) : (
                       <>
                         {rule.kind === 'income' ? '+' : '−'}฿

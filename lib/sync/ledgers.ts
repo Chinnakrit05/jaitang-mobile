@@ -35,6 +35,9 @@ export type LocalLedger = {
   created_at: string | null;
   updated_at: string | null;
   deleted_at: string | null;
+  // Local-first: 'local' ledgers never sync; 'synced' ledgers push/pull.
+  sync_mode: 'local' | 'synced';
+  promoted_at: string | null;
   _sync_state: 'clean' | 'pending_create' | 'pending_update' | 'pending_delete';
 };
 
@@ -95,10 +98,13 @@ export async function pullLedgers(): Promise<{ pulled: number }> {
   await db.withTransactionAsync(async () => {
     for (const r of merged.values()) {
       await db.runAsync(
+        // Anything coming back from the cloud is by definition synced. We
+        // never downgrade a row to 'local' here, and we don't touch
+        // `promoted_at` (not a server column).
         `INSERT INTO ledgers (
           id, name, icon, color, currency, owner_id, is_personal, role,
-          created_at, updated_at, deleted_at, _sync_state
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'clean')
+          created_at, updated_at, deleted_at, sync_mode, _sync_state
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'synced', 'clean')
         ON CONFLICT(id) DO UPDATE SET
           name=excluded.name,
           icon=excluded.icon,
@@ -110,6 +116,7 @@ export async function pullLedgers(): Promise<{ pulled: number }> {
           created_at=excluded.created_at,
           updated_at=excluded.updated_at,
           deleted_at=excluded.deleted_at,
+          sync_mode='synced',
           _sync_state='clean'
         `,
         [
@@ -146,6 +153,8 @@ function toLocal(l: RawLedger, role: LocalLedger['role']): LocalLedger {
     created_at: l.created_at,
     updated_at: l.updated_at,
     deleted_at: l.deleted_at,
+    sync_mode: 'synced',
+    promoted_at: null,
     _sync_state: 'clean',
   };
 }

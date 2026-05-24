@@ -1,8 +1,16 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getLocalLedger, listLocalLedgers } from '../db/ledgers';
+import {
+  createLocalLedger,
+  deleteLocalLedgerRow,
+  getLocalLedger,
+  listLocalLedgers,
+  updateLocalLedgerMeta,
+} from '../db/ledgers';
+import { seedDefaultCategoriesLocal } from '../db/categories';
 import { pullLedgers } from '../sync/ledgers';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../../providers/AuthProvider';
 
 export type LedgerSummary = {
   id: string;
@@ -65,15 +73,26 @@ export function useUpdateLedger() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateLedgerInput) => {
-      const { error } = await supabase.rpc('update_ledger', {
-        p_id: input.id,
-        p_name: input.name,
-        p_icon: input.icon,
-        p_color: input.color,
-        p_currency: input.currency,
-      });
-      if (error) throw error;
-      await pullLedgers();
+      const existing = await getLocalLedger(input.id);
+      if (existing?.sync_mode === 'local') {
+        // Local-only ledger — edit in place, no cloud round-trip.
+        await updateLocalLedgerMeta(input.id, {
+          name: input.name,
+          icon: input.icon,
+          color: input.color,
+          currency: input.currency,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_ledger', {
+          p_id: input.id,
+          p_name: input.name,
+          p_icon: input.icon,
+          p_color: input.color,
+          p_currency: input.currency,
+        });
+        if (error) throw error;
+        await pullLedgers();
+      }
       await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
       await qc.refetchQueries({ queryKey: ['local-ledgers'] });
     },
@@ -89,9 +108,15 @@ export function useDeleteLedger() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error } = await supabase.rpc('delete_ledger', { p_id: id });
-      if (error) throw error;
-      await pullLedgers();
+      const existing = await getLocalLedger(id);
+      if (existing?.sync_mode === 'local') {
+        // Never uploaded — hard-remove on-device, nothing to tombstone.
+        await deleteLocalLedgerRow(id);
+      } else {
+        const { error } = await supabase.rpc('delete_ledger', { p_id: id });
+        if (error) throw error;
+        await pullLedgers();
+      }
       await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
       await qc.refetchQueries({ queryKey: ['local-ledgers'] });
     },
@@ -99,47 +124,38 @@ export function useDeleteLedger() {
 }
 
 /**
- * Creates a ledger by calling the `create_ledger` Postgres function
- * (SECURITY DEFINER). The function bypasses the ledger-member RLS
- * policy and atomically writes both the `ledgers` row and the owner's
- * `ledger_members` row, sidestepping the chicken-and-egg problem where
- * INSERT-on-ledgers is blocked because the user isn't yet a member.
+ * Creates a ledger **local-first**: written to SQLite only, with a client
+ * UUID, `sync_mode='local'` and `_sync_state='pending_create'`. Nothing is
+ * uploaded — the ledger lives only on this device until the user enables
+ * cloud sync or shares it, at which point the promote flow pushes it (and
+ * its children) to the cloud and flips it to 'synced'. See
+ * LOCAL_FIRST_PLAN.md.
  *
- * After the RPC succeeds, kicks a `pullLedgers()` so the local mirror
- * picks up the new row immediately and invalidates the query screens
- * read from.
- *
- * TODO(Phase E): when the sync engine grows a push path for ledgers,
- * switch this to write through `_sync_state='pending_create'` instead
- * and let the engine call the RPC during the next push tick.
+ * (Previously this called the `create_ledger` RPC and pulled it back; that
+ * path moves into the promote step in a later phase.)
  */
 export function useCreateLedger() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: NewLedgerInput) => {
-      const { data, error } = await supabase.rpc('create_ledger', {
-        p_name: input.name,
-        p_icon: input.icon ?? null,
-        p_color: input.color ?? null,
-        p_currency: input.currency ?? 'THB',
-        p_is_personal: input.is_personal ?? true,
+      const userId = session?.user.id;
+      if (!userId) throw new Error('Not signed in');
+      const newId = await createLocalLedger({
+        name: input.name,
+        icon: input.icon ?? null,
+        color: input.color ?? null,
+        currency: input.currency ?? 'THB',
+        is_personal: input.is_personal ?? true,
+        owner_id: userId,
       });
-      if (error) throw error;
-      if (!data) throw new Error('create_ledger returned no id');
-      const newId = data as string;
-      // Refresh the local mirror so the new ledger appears in
-      // `useLedgers()` without waiting for the 30s sync tick.
-      const pull = await pullLedgers();
-      const local = await listLocalLedgers();
-      const localHasIt = await getLocalLedger(newId);
-      console.log('[createLedger] rpc id=', newId);
-      console.log('[createLedger] pulled', pull.pulled, 'rows');
-      console.log('[createLedger] local now has', local.length, 'ledgers');
-      console.log('[createLedger] local has new id?', !!localHasIt);
+      // Seed the default category hierarchy on-device so a brand-new local
+      // ledger is immediately usable (the cloud path seeds server-side).
+      await seedDefaultCategoriesLocal(newId);
       await qc.invalidateQueries({ queryKey: ['local-ledgers'] });
-      // Active queries refetch in the background after invalidate; force
-      // a synchronous refetch so the screen that mounts next already sees
-      // the new row instead of stale (empty) cache.
+      await qc.invalidateQueries({ queryKey: ['local-categories'] });
+      // Force a synchronous refetch so the screen that mounts next already
+      // sees the new row instead of stale (empty) cache.
       await qc.refetchQueries({ queryKey: ['local-ledgers'] });
       return newId;
     },

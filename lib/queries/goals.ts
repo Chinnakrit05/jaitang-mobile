@@ -1,12 +1,26 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  addLocalGoalContribution,
+  createLocalGoal,
+  deleteLocalGoal,
+  deleteLocalGoalContribution,
   getLocalGoalProgress,
   listLocalGoalContributions,
   listLocalGoals,
+  setLocalGoalArchived,
+  updateLocalGoal,
 } from '../db/goals';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerGoals } from '../sync/goals';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../../providers/AuthProvider';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Goals CRUD + contribution log.
@@ -104,18 +118,31 @@ export function useCreateGoal() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: NewGoalInput) => {
-      const { data, error } = await supabase.rpc('create_goal', {
-        p_ledger_id: input.ledger_id,
-        p_name: input.name,
-        p_icon: input.icon ?? null,
-        p_color: input.color ?? null,
-        p_target_amount: input.target_amount,
-        p_deadline: input.deadline ?? null,
-      });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        id = await createLocalGoal({
+          ledger_id: input.ledger_id,
+          name: input.name,
+          icon: input.icon ?? null,
+          color: input.color ?? null,
+          target_amount: input.target_amount,
+          deadline: input.deadline ?? null,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('create_goal', {
+          p_ledger_id: input.ledger_id,
+          p_name: input.name,
+          p_icon: input.icon ?? null,
+          p_color: input.color ?? null,
+          p_target_amount: input.target_amount,
+          p_deadline: input.deadline ?? null,
+        });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+        id = data as string;
+      }
       await invalidateGoals(qc);
-      return data as string;
+      return id;
     },
   });
 }
@@ -134,16 +161,26 @@ export function useUpdateGoal() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateGoalInput) => {
-      const { error } = await supabase.rpc('update_goal', {
-        p_id: input.id,
-        p_name: input.name,
-        p_icon: input.icon,
-        p_color: input.color,
-        p_target_amount: input.target_amount,
-        p_deadline: input.deadline,
-      });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalGoal(input.id, {
+          name: input.name,
+          icon: input.icon,
+          color: input.color,
+          target_amount: input.target_amount,
+          deadline: input.deadline,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_goal', {
+          p_id: input.id,
+          p_name: input.name,
+          p_icon: input.icon,
+          p_color: input.color,
+          p_target_amount: input.target_amount,
+          p_deadline: input.deadline,
+        });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+      }
       await invalidateGoals(qc);
     },
   });
@@ -157,12 +194,16 @@ export function useSetGoalArchived() {
       ledger_id: string;
       archived: boolean;
     }) => {
-      const { error } = await supabase.rpc('set_goal_archived', {
-        p_id: input.id,
-        p_archived: input.archived,
-      });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await setLocalGoalArchived(input.id, input.archived);
+      } else {
+        const { error } = await supabase.rpc('set_goal_archived', {
+          p_id: input.id,
+          p_archived: input.archived,
+        });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+      }
       await invalidateGoals(qc);
     },
   });
@@ -172,9 +213,13 @@ export function useDeleteGoal() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_goal', { p_id: input.id });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalGoal(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_goal', { p_id: input.id });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+      }
       await invalidateGoals(qc);
     },
   });
@@ -182,6 +227,7 @@ export function useDeleteGoal() {
 
 export function useAddGoalContribution() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: {
       goal_id: string;
@@ -190,16 +236,31 @@ export function useAddGoalContribution() {
       note?: string | null;
       occurred_at?: string;
     }) => {
-      const { data, error } = await supabase.rpc('add_goal_contribution', {
-        p_goal_id: input.goal_id,
-        p_amount: input.amount,
-        p_note: input.note ?? null,
-        p_occurred_at: input.occurred_at ?? new Date().toISOString(),
-      });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        id = await addLocalGoalContribution({
+          goal_id: input.goal_id,
+          ledger_id: input.ledger_id,
+          user_id: userId,
+          amount: input.amount,
+          note: input.note ?? null,
+          occurred_at: input.occurred_at,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('add_goal_contribution', {
+          p_goal_id: input.goal_id,
+          p_amount: input.amount,
+          p_note: input.note ?? null,
+          p_occurred_at: input.occurred_at ?? new Date().toISOString(),
+        });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+        id = data as string;
+      }
       await invalidateGoals(qc);
-      return data as string;
+      return id;
     },
   });
 }
@@ -208,11 +269,15 @@ export function useDeleteGoalContribution() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_goal_contribution', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerGoals(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalGoalContribution(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_goal_contribution', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerGoals(input.ledger_id);
+      }
       await invalidateGoals(qc);
     },
   });

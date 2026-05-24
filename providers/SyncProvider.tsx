@@ -62,8 +62,12 @@ export function SyncProvider({ children }: { children: ReactNode }) {
       const ledgerResult = await pullLedgers();
 
       // 2. Derive ledger ids from the local mirror that was just refreshed.
+      // Local-first: only SYNCED ledgers push/pull. 'local' ledgers live
+      // only on this device until the user enables cloud sync / shares.
       const localLedgers = await listLocalLedgers();
-      const ledgerIds = localLedgers.map((l) => l.id);
+      const ledgerIds = localLedgers
+        .filter((l) => l.sync_mode === 'synced')
+        .map((l) => l.id);
 
       // 3. Per-ledger pulls — sequential, NOT Promise.all.
       // Each pull wraps its writes in `db.withTransactionAsync`, and

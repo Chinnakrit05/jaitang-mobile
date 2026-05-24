@@ -1,8 +1,23 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listLocalRecurring } from '../db/recurring';
+import {
+  createLocalRecurring,
+  deleteLocalRecurring,
+  fillPendingRecurringLocal,
+  listLocalRecurring,
+  runDueRecurringLocal,
+  updateLocalRecurring,
+} from '../db/recurring';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerRecurring } from '../sync/recurring';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../../providers/AuthProvider';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Recurring rules — local SQLite mirror for read, RPC for write.
@@ -78,22 +93,40 @@ export type NewRecurringInput = {
 
 export function useCreateRecurring() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: NewRecurringInput) => {
-      const { data, error } = await supabase.rpc('create_recurring', {
-        p_ledger_id: input.ledger_id,
-        p_kind: input.kind,
-        p_amount: input.amount,
-        p_note: input.note,
-        p_category_id: input.category_id,
-        p_period: input.period,
-        p_next_run_at: input.next_run_at,
-      });
-      if (error) throw error;
-      await refreshLedgerRecurring(input.ledger_id);
+      let newId: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        newId = await createLocalRecurring({
+          ledger_id: input.ledger_id,
+          user_id: userId,
+          kind: input.kind,
+          amount: input.amount,
+          note: input.note,
+          category_id: input.category_id,
+          period: input.period,
+          next_run_at: input.next_run_at,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('create_recurring', {
+          p_ledger_id: input.ledger_id,
+          p_kind: input.kind,
+          p_amount: input.amount,
+          p_note: input.note,
+          p_category_id: input.category_id,
+          p_period: input.period,
+          p_next_run_at: input.next_run_at,
+        });
+        if (error) throw error;
+        await refreshLedgerRecurring(input.ledger_id);
+        newId = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-recurring'] });
       await qc.refetchQueries({ queryKey: ['local-recurring'] });
-      return data as string;
+      return newId;
     },
   });
 }
@@ -113,17 +146,28 @@ export function useUpdateRecurring() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateRecurringInput) => {
-      const { error } = await supabase.rpc('update_recurring', {
-        p_id: input.id,
-        p_kind: input.kind,
-        p_amount: input.amount,
-        p_note: input.note,
-        p_category_id: input.category_id,
-        p_period: input.period,
-        p_active: input.active,
-      });
-      if (error) throw error;
-      await refreshLedgerRecurring(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalRecurring(input.id, {
+          kind: input.kind,
+          amount: input.amount,
+          note: input.note,
+          category_id: input.category_id,
+          period: input.period,
+          active: input.active,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_recurring', {
+          p_id: input.id,
+          p_kind: input.kind,
+          p_amount: input.amount,
+          p_note: input.note,
+          p_category_id: input.category_id,
+          p_period: input.period,
+          p_active: input.active,
+        });
+        if (error) throw error;
+        await refreshLedgerRecurring(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-recurring'] });
       await qc.refetchQueries({ queryKey: ['local-recurring'] });
     },
@@ -134,11 +178,15 @@ export function useDeleteRecurring() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_recurring', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerRecurring(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalRecurring(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_recurring', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerRecurring(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-recurring'] });
       await qc.refetchQueries({ queryKey: ['local-recurring'] });
     },
@@ -152,16 +200,25 @@ export function useDeleteRecurring() {
  */
 export function useRunDueRecurring() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (ledgerId: string) => {
-      const { data, error } = await supabase.rpc('run_due_recurring', {
-        p_ledger_id: ledgerId,
-      });
-      if (error) throw error;
-      await refreshLedgerRecurring(ledgerId);
+      let fired: number;
+      if (await isLocalLedger(ledgerId)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        fired = await runDueRecurringLocal(ledgerId, userId);
+      } else {
+        const { data, error } = await supabase.rpc('run_due_recurring', {
+          p_ledger_id: ledgerId,
+        });
+        if (error) throw error;
+        await refreshLedgerRecurring(ledgerId);
+        fired = (data ?? 0) as number;
+      }
       await qc.invalidateQueries({ queryKey: ['local-recurring'] });
       await qc.invalidateQueries({ queryKey: ['local-tx'] });
-      return (data ?? 0) as number;
+      return fired;
     },
   });
 }
@@ -174,18 +231,25 @@ export function useRunDueRecurring() {
  */
 export function useFillPendingRecurring() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: {
       id: string;
       ledger_id: string;
       amount: number;
     }) => {
-      const { error } = await supabase.rpc('fill_pending_recurring', {
-        p_id: input.id,
-        p_amount: input.amount,
-      });
-      if (error) throw error;
-      await refreshLedgerRecurring(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        await fillPendingRecurringLocal(input.id, input.amount, userId);
+      } else {
+        const { error } = await supabase.rpc('fill_pending_recurring', {
+          p_id: input.id,
+          p_amount: input.amount,
+        });
+        if (error) throw error;
+        await refreshLedgerRecurring(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-recurring'] });
       await qc.invalidateQueries({ queryKey: ['local-tx'] });
     },

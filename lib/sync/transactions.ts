@@ -120,13 +120,23 @@ export async function pullTransactions(opts: {
   return { pulled: data?.length ?? 0 };
 }
 
-export async function pushTransactions(): Promise<{
+export async function pushTransactions(opts: {
+  ledgerIds: string[];
+}): Promise<{
   pushed: number;
   failed: number;
 }> {
+  // Only push transactions that belong to a synced ledger. Rows in a
+  // local-only ledger must never leave the device (and would fail server
+  // FK/RLS checks anyway since the ledger doesn't exist in the cloud).
+  if (opts.ledgerIds.length === 0) return { pushed: 0, failed: 0 };
   const db = await getDb();
+  const placeholders = opts.ledgerIds.map(() => '?').join(',');
   const pending = await db.getAllAsync<LocalTx>(
-    `SELECT * FROM transactions WHERE _sync_state IN ('pending_create','pending_update','pending_delete')`,
+    `SELECT * FROM transactions
+     WHERE _sync_state IN ('pending_create','pending_update','pending_delete')
+       AND ledger_id IN (${placeholders})`,
+    opts.ledgerIds,
   );
   let pushed = 0;
   let failed = 0;
@@ -198,8 +208,9 @@ export async function syncTransactions(opts: {
   ledgerIds: string[];
 }): Promise<{ pushed: number; pulled: number; failed: number }> {
   // Push first so newly-uploaded rows pick up their server `updated_at`
-  // on the pull pass that follows.
-  const { pushed, failed } = await pushTransactions();
+  // on the pull pass that follows. Both push and pull are scoped to the
+  // same (synced) ledger ids.
+  const { pushed, failed } = await pushTransactions(opts);
   const { pulled } = await pullTransactions(opts);
   return { pushed, pulled, failed };
 }

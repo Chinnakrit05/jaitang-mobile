@@ -1,8 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listLocalCategories } from '../db/categories';
+import {
+  createLocalCategory,
+  deleteLocalCategory,
+  listLocalCategories,
+  seedDefaultCategoriesLocal,
+  updateLocalCategory,
+} from '../db/categories';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerCategories } from '../sync/categories';
 import { supabase } from '../supabase/client';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 export type Category = {
   id: string;
@@ -77,20 +90,26 @@ export function useCreateCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: NewCategoryInput) => {
-      const { data, error } = await supabase.rpc('create_category', {
-        p_ledger_id: input.ledger_id,
-        p_name: input.name,
-        p_kind: input.kind,
-        p_icon: input.icon ?? null,
-        p_color: input.color ?? null,
-        p_parent_id: input.parent_id ?? null,
-        p_sort_order: input.sort_order ?? 0,
-      });
-      if (error) throw error;
-      await refreshLedgerCategories(input.ledger_id);
+      let newId: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        newId = await createLocalCategory(input);
+      } else {
+        const { data, error } = await supabase.rpc('create_category', {
+          p_ledger_id: input.ledger_id,
+          p_name: input.name,
+          p_kind: input.kind,
+          p_icon: input.icon ?? null,
+          p_color: input.color ?? null,
+          p_parent_id: input.parent_id ?? null,
+          p_sort_order: input.sort_order ?? 0,
+        });
+        if (error) throw error;
+        await refreshLedgerCategories(input.ledger_id);
+        newId = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-categories'] });
       await qc.refetchQueries({ queryKey: ['local-categories'] });
-      return data as string;
+      return newId;
     },
   });
 }
@@ -99,14 +118,22 @@ export function useUpdateCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateCategoryInput) => {
-      const { error } = await supabase.rpc('update_category', {
-        p_id: input.id,
-        p_name: input.name,
-        p_icon: input.icon,
-        p_parent_id: input.parent_id,
-      });
-      if (error) throw error;
-      await refreshLedgerCategories(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalCategory(input.id, {
+          name: input.name,
+          icon: input.icon,
+          parent_id: input.parent_id,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_category', {
+          p_id: input.id,
+          p_name: input.name,
+          p_icon: input.icon,
+          p_parent_id: input.parent_id,
+        });
+        if (error) throw error;
+        await refreshLedgerCategories(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-categories'] });
       await qc.refetchQueries({ queryKey: ['local-categories'] });
     },
@@ -123,14 +150,20 @@ export function useSeedDefaultCategories() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (ledger_id: string) => {
-      const { data, error } = await supabase.rpc('seed_default_categories', {
-        p_ledger_id: ledger_id,
-      });
-      if (error) throw error;
-      await refreshLedgerCategories(ledger_id);
+      let count: number;
+      if (await isLocalLedger(ledger_id)) {
+        count = await seedDefaultCategoriesLocal(ledger_id);
+      } else {
+        const { data, error } = await supabase.rpc('seed_default_categories', {
+          p_ledger_id: ledger_id,
+        });
+        if (error) throw error;
+        await refreshLedgerCategories(ledger_id);
+        count = (data ?? 0) as number;
+      }
       await qc.invalidateQueries({ queryKey: ['local-categories'] });
       await qc.refetchQueries({ queryKey: ['local-categories'] });
-      return (data ?? 0) as number;
+      return count;
     },
   });
 }
@@ -147,11 +180,15 @@ export function useDeleteCategory() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_category', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerCategories(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalCategory(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_category', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerCategories(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-categories'] });
       await qc.refetchQueries({ queryKey: ['local-categories'] });
     },

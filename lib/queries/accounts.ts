@@ -1,8 +1,22 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { getLocalAccountBalances, listLocalAccounts } from '../db/accounts';
+import {
+  createLocalAccount,
+  deleteLocalAccount,
+  getLocalAccountBalances,
+  listLocalAccounts,
+  setLocalAccountArchived,
+  updateLocalAccount,
+} from '../db/accounts';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerAccounts } from '../sync/accounts';
 import { supabase } from '../supabase/client';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Account CRUD + queries.
@@ -85,21 +99,27 @@ export function useCreateAccount() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: NewAccountInput) => {
-      const { data, error } = await supabase.rpc('create_account', {
-        p_ledger_id: input.ledger_id,
-        p_name: input.name,
-        p_type: input.type,
-        p_icon: input.icon ?? null,
-        p_color: input.color ?? null,
-        p_initial_balance: input.initial_balance ?? 0,
-        p_currency: input.currency ?? null,
-      });
-      if (error) throw error;
-      await refreshLedgerAccounts(input.ledger_id);
+      let newId: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        newId = await createLocalAccount(input);
+      } else {
+        const { data, error } = await supabase.rpc('create_account', {
+          p_ledger_id: input.ledger_id,
+          p_name: input.name,
+          p_type: input.type,
+          p_icon: input.icon ?? null,
+          p_color: input.color ?? null,
+          p_initial_balance: input.initial_balance ?? 0,
+          p_currency: input.currency ?? null,
+        });
+        if (error) throw error;
+        await refreshLedgerAccounts(input.ledger_id);
+        newId = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-accounts'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-accounts'] });
-      return data as string;
+      return newId;
     },
   });
 }
@@ -119,17 +139,28 @@ export function useUpdateAccount() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateAccountInput) => {
-      const { error } = await supabase.rpc('update_account', {
-        p_id: input.id,
-        p_name: input.name,
-        p_type: input.type,
-        p_icon: input.icon,
-        p_color: input.color,
-        p_initial_balance: input.initial_balance,
-        p_currency: input.currency,
-      });
-      if (error) throw error;
-      await refreshLedgerAccounts(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalAccount(input.id, {
+          name: input.name,
+          type: input.type,
+          icon: input.icon,
+          color: input.color,
+          initial_balance: input.initial_balance,
+          currency: input.currency,
+        });
+      } else {
+        const { error } = await supabase.rpc('update_account', {
+          p_id: input.id,
+          p_name: input.name,
+          p_type: input.type,
+          p_icon: input.icon,
+          p_color: input.color,
+          p_initial_balance: input.initial_balance,
+          p_currency: input.currency,
+        });
+        if (error) throw error;
+        await refreshLedgerAccounts(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-accounts'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-accounts'] });
@@ -145,12 +176,16 @@ export function useSetAccountArchived() {
       ledger_id: string;
       archived: boolean;
     }) => {
-      const { error } = await supabase.rpc('set_account_archived', {
-        p_id: input.id,
-        p_archived: input.archived,
-      });
-      if (error) throw error;
-      await refreshLedgerAccounts(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await setLocalAccountArchived(input.id, input.archived);
+      } else {
+        const { error } = await supabase.rpc('set_account_archived', {
+          p_id: input.id,
+          p_archived: input.archived,
+        });
+        if (error) throw error;
+        await refreshLedgerAccounts(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-accounts'] });
       await qc.refetchQueries({ queryKey: ['local-accounts'] });
     },
@@ -161,17 +196,21 @@ export function useDeleteAccount() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_account', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerAccounts(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalAccount(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_account', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerAccounts(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-accounts'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-accounts'] });
       // Transactions that referenced this account now have account_id =
-      // NULL server-side; invalidate so the local tx cache picks that
-      // up on the next pull tick.
+      // NULL (server-side for synced, in-place for local); invalidate so
+      // the local tx cache picks that up.
       await qc.invalidateQueries({ queryKey: ['local-tx'] });
     },
   });

@@ -1,8 +1,21 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
-import { listLocalTransfers } from '../db/transfers';
+import {
+  createLocalTransfer,
+  deleteLocalTransfer,
+  listLocalTransfers,
+  updateLocalTransfer,
+} from '../db/transfers';
+import { getLocalLedger } from '../db/ledgers';
 import { refreshLedgerTransfers } from '../sync/transfers';
 import { supabase } from '../supabase/client';
+import { useAuth } from '../../providers/AuthProvider';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 /**
  * Transfer CRUD + queries.
@@ -70,26 +83,47 @@ export type NewTransferInput = {
 
 export function useCreateTransfer() {
   const qc = useQueryClient();
+  const { session } = useAuth();
   return useMutation({
     mutationFn: async (input: NewTransferInput) => {
-      const { data, error } = await supabase.rpc('create_transfer', {
-        p_ledger_id: input.ledger_id,
-        p_from_account_id: input.from_account_id,
-        p_to_account_id: input.to_account_id,
-        p_from_amount: input.from_amount,
-        p_from_currency: input.from_currency,
-        p_to_amount: input.to_amount,
-        p_to_currency: input.to_currency,
-        p_fx_rate: input.fx_rate,
-        p_note: input.note ?? null,
-        p_occurred_at: input.occurred_at ?? new Date().toISOString(),
-      });
-      if (error) throw error;
-      await refreshLedgerTransfers(input.ledger_id);
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        const userId = session?.user.id;
+        if (!userId) throw new Error('Not signed in');
+        id = await createLocalTransfer({
+          ledger_id: input.ledger_id,
+          user_id: userId,
+          from_account_id: input.from_account_id,
+          to_account_id: input.to_account_id,
+          from_amount: input.from_amount,
+          from_currency: input.from_currency,
+          to_amount: input.to_amount,
+          to_currency: input.to_currency,
+          fx_rate: input.fx_rate,
+          note: input.note ?? null,
+          occurred_at: input.occurred_at,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('create_transfer', {
+          p_ledger_id: input.ledger_id,
+          p_from_account_id: input.from_account_id,
+          p_to_account_id: input.to_account_id,
+          p_from_amount: input.from_amount,
+          p_from_currency: input.from_currency,
+          p_to_amount: input.to_amount,
+          p_to_currency: input.to_currency,
+          p_fx_rate: input.fx_rate,
+          p_note: input.note ?? null,
+          p_occurred_at: input.occurred_at ?? new Date().toISOString(),
+        });
+        if (error) throw error;
+        await refreshLedgerTransfers(input.ledger_id);
+        id = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-transfers'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-transfers'] });
-      return data as string;
+      return id;
     },
   });
 }
@@ -112,20 +146,34 @@ export function useUpdateTransfer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpdateTransferInput) => {
-      const { error } = await supabase.rpc('update_transfer', {
-        p_id: input.id,
-        p_from_account_id: input.from_account_id,
-        p_to_account_id: input.to_account_id,
-        p_from_amount: input.from_amount,
-        p_from_currency: input.from_currency,
-        p_to_amount: input.to_amount,
-        p_to_currency: input.to_currency,
-        p_fx_rate: input.fx_rate,
-        p_note: input.note ?? null,
-        p_occurred_at: input.occurred_at ?? new Date().toISOString(),
-      });
-      if (error) throw error;
-      await refreshLedgerTransfers(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await updateLocalTransfer(input.id, {
+          from_account_id: input.from_account_id,
+          to_account_id: input.to_account_id,
+          from_amount: input.from_amount,
+          from_currency: input.from_currency,
+          to_amount: input.to_amount,
+          to_currency: input.to_currency,
+          fx_rate: input.fx_rate,
+          note: input.note ?? null,
+          occurred_at: input.occurred_at ?? new Date().toISOString(),
+        });
+      } else {
+        const { error } = await supabase.rpc('update_transfer', {
+          p_id: input.id,
+          p_from_account_id: input.from_account_id,
+          p_to_account_id: input.to_account_id,
+          p_from_amount: input.from_amount,
+          p_from_currency: input.from_currency,
+          p_to_amount: input.to_amount,
+          p_to_currency: input.to_currency,
+          p_fx_rate: input.fx_rate,
+          p_note: input.note ?? null,
+          p_occurred_at: input.occurred_at ?? new Date().toISOString(),
+        });
+        if (error) throw error;
+        await refreshLedgerTransfers(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-transfers'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-transfers'] });
@@ -137,11 +185,15 @@ export function useDeleteTransfer() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_transfer', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await refreshLedgerTransfers(input.ledger_id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalTransfer(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_transfer', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await refreshLedgerTransfers(input.ledger_id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-transfers'] });
       await qc.invalidateQueries({ queryKey: ['account-balances'] });
       await qc.refetchQueries({ queryKey: ['local-transfers'] });

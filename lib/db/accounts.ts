@@ -3,6 +3,133 @@ import type { LocalAccount } from '../sync/accounts';
 
 export type LocalAccountRow = LocalAccount;
 
+function randomUuid(): string {
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
+type AccountType = 'cash' | 'bank' | 'credit_card' | 'e_wallet';
+
+// ── Local-first writes (used for `local` ledgers; see LOCAL_FIRST_PLAN.md) ──
+
+export type NewLocalAccount = {
+  ledger_id: string;
+  name: string;
+  type: AccountType;
+  icon?: string | null;
+  color?: string | null;
+  initial_balance?: number;
+  currency?: string | null;
+};
+
+/** Create an account on-device (client UUID, `pending_create`). */
+export async function createLocalAccount(input: NewLocalAccount): Promise<string> {
+  const db = await getDb();
+  const id = randomUuid();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `INSERT INTO accounts (
+      id, ledger_id, name, type, icon, color, initial_balance, currency,
+      archived, created_at, updated_at, deleted_at, _sync_state
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, 'pending_create')`,
+    [
+      id,
+      input.ledger_id,
+      input.name,
+      input.type,
+      input.icon ?? null,
+      input.color ?? null,
+      input.initial_balance ?? 0,
+      input.currency ?? null,
+      now,
+      now,
+    ],
+  );
+  return id;
+}
+
+/** Update an account on-device (keeps a never-pushed row as pending_create). */
+export async function updateLocalAccount(
+  id: string,
+  patch: {
+    name: string;
+    type: AccountType;
+    icon: string | null;
+    color: string | null;
+    initial_balance: number;
+    currency: string | null;
+  },
+): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE accounts
+       SET name=?, type=?, icon=?, color=?, initial_balance=?, currency=?, updated_at=?,
+           _sync_state=CASE WHEN _sync_state='pending_create'
+                            THEN 'pending_create' ELSE 'pending_update' END
+     WHERE id=?`,
+    [
+      patch.name,
+      patch.type,
+      patch.icon,
+      patch.color,
+      patch.initial_balance,
+      patch.currency,
+      now,
+      id,
+    ],
+  );
+}
+
+/** Toggle archived on-device. */
+export async function setLocalAccountArchived(
+  id: string,
+  archived: boolean,
+): Promise<void> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  await db.runAsync(
+    `UPDATE accounts
+       SET archived=?, updated_at=?,
+           _sync_state=CASE WHEN _sync_state='pending_create'
+                            THEN 'pending_create' ELSE 'pending_update' END
+     WHERE id=?`,
+    [archived ? 1 : 0, now, id],
+  );
+}
+
+/**
+ * Delete an account on-device. A never-pushed row is hard-removed; an
+ * already-synced row is soft-deleted (tombstone). Either way, local
+ * transactions that referenced it have their `account_id` cleared (mirrors
+ * the server's `delete_account`, which nulls the FK).
+ */
+export async function deleteLocalAccount(id: string): Promise<void> {
+  const db = await getDb();
+  const row = await db.getFirstAsync<{ _sync_state: string }>(
+    `SELECT _sync_state FROM accounts WHERE id=?`,
+    [id],
+  );
+  const now = new Date().toISOString();
+  await db.withTransactionAsync(async () => {
+    await db.runAsync(
+      `UPDATE transactions SET account_id=NULL WHERE account_id=?`,
+      [id],
+    );
+    if (row?._sync_state === 'pending_create') {
+      await db.runAsync(`DELETE FROM accounts WHERE id=?`, [id]);
+    } else {
+      await db.runAsync(
+        `UPDATE accounts SET deleted_at=?, updated_at=?, _sync_state='pending_delete' WHERE id=?`,
+        [now, now, id],
+      );
+    }
+  });
+}
+
 export async function listLocalAccounts(
   ledgerId: string,
   opts: { includeArchived?: boolean } = {},

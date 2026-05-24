@@ -1,12 +1,20 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 
 import {
+  createOrUpdateLocalBudget,
   deleteLocalBudget,
   getCategorySpendForPeriod,
   listLocalBudgets,
   upsertLocalBudget,
 } from '../db/budgets';
+import { getLocalLedger } from '../db/ledgers';
 import { supabase } from '../supabase/client';
+
+/** A ledger is local-first (no cloud) until the user enables sync / shares. */
+async function isLocalLedger(ledgerId: string): Promise<boolean> {
+  const l = await getLocalLedger(ledgerId);
+  return l?.sync_mode === 'local';
+}
 
 export type Budget = {
   id: string;
@@ -84,23 +92,34 @@ export function useUpsertBudget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: UpsertBudgetInput) => {
-      const { data, error } = await supabase.rpc('upsert_budget', {
-        p_ledger_id: input.ledger_id,
-        p_category_id: input.category_id,
-        p_amount: input.amount,
-        p_period: input.period,
-      });
-      if (error) throw error;
-      await upsertLocalBudget({
-        id: data as string,
-        ledger_id: input.ledger_id,
-        category_id: input.category_id,
-        amount: input.amount,
-        period: input.period,
-      });
+      let id: string;
+      if (await isLocalLedger(input.ledger_id)) {
+        id = await createOrUpdateLocalBudget({
+          ledger_id: input.ledger_id,
+          category_id: input.category_id,
+          amount: input.amount,
+          period: input.period,
+        });
+      } else {
+        const { data, error } = await supabase.rpc('upsert_budget', {
+          p_ledger_id: input.ledger_id,
+          p_category_id: input.category_id,
+          p_amount: input.amount,
+          p_period: input.period,
+        });
+        if (error) throw error;
+        await upsertLocalBudget({
+          id: data as string,
+          ledger_id: input.ledger_id,
+          category_id: input.category_id,
+          amount: input.amount,
+          period: input.period,
+        });
+        id = data as string;
+      }
       await qc.invalidateQueries({ queryKey: ['local-budgets'] });
       await qc.refetchQueries({ queryKey: ['local-budgets'] });
-      return data as string;
+      return id;
     },
   });
 }
@@ -109,11 +128,15 @@ export function useDeleteBudget() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (input: { id: string; ledger_id: string }) => {
-      const { error } = await supabase.rpc('delete_budget', {
-        p_id: input.id,
-      });
-      if (error) throw error;
-      await deleteLocalBudget(input.id);
+      if (await isLocalLedger(input.ledger_id)) {
+        await deleteLocalBudget(input.id);
+      } else {
+        const { error } = await supabase.rpc('delete_budget', {
+          p_id: input.id,
+        });
+        if (error) throw error;
+        await deleteLocalBudget(input.id);
+      }
       await qc.invalidateQueries({ queryKey: ['local-budgets'] });
       await qc.refetchQueries({ queryKey: ['local-budgets'] });
     },
