@@ -133,6 +133,17 @@ export default function InsightsScreen() {
   const txs = useLocalTransactions({ ledgerId: ledger?.id, limit: 2000 });
   const cats = useCategories(ledger?.id);
   const [period, setPeriod] = useState<Period>('month');
+  // Tapping a floating chip on the donut drills into that category —
+  // the transactions list below filters to just those rows. `null` =
+  // no filter. Special string `'__none__'` = the uncategorized bucket
+  // (when a slice represents transactions with category_id = NULL).
+  const [selectedCatId, setSelectedCatId] = useState<string | null>(null);
+  // Switching periods may make the previous selection meaningless —
+  // close the drilldown so the user sees the full donut for the new
+  // range, not a stale category list.
+  useEffect(() => {
+    setSelectedCatId(null);
+  }, [period]);
 
   const range = useMemo(() => getPeriodRange(period, locale), [period, locale]);
   const budgetPeriod = monthKey(range.from);
@@ -397,18 +408,112 @@ export default function InsightsScreen() {
             </View>
           </View>
 
-          {/* Donut */}
-          <View className="items-center my-2">
+          {/* Donut + legend — same side-by-side layout as the home
+              dashboard's category card. Each legend row is tappable to
+              drill into that category's transactions below. */}
+          <View
+            className="rounded-2xl p-4 flex-row items-center gap-4 my-2"
+            style={{ backgroundColor: c.bg }}
+          >
             <Donut
               data={breakdown.slices}
-              size={150}
-              strokeWidth={20}
               trackColor={c.chip}
               labelColor={c.textMuted}
               centerColor={c.text}
               label={t('dashboard.donutSpent')}
               centerValue={hasAnyData ? `฿${formatTHB(periodExpense)}` : '—'}
             />
+            <View className="flex-1 gap-2">
+              {breakdown.rows.length === 0 ? (
+                <Text style={{ color: c.textSecondary, fontSize: 12 }}>
+                  {t('insights.noPeriodExpense', {
+                    defaultValue: 'No expenses in this period',
+                  })}
+                </Text>
+              ) : (
+                breakdown.rows.map((r, i) => {
+                  const chipId = r.id ?? '__none__';
+                  const isSelected = selectedCatId === chipId;
+                  const color =
+                    CATEGORY_PALETTE[i % CATEGORY_PALETTE.length];
+                  return (
+                    <Pressable
+                      key={chipId}
+                      onPress={() =>
+                        setSelectedCatId((cur) =>
+                          cur === chipId ? null : chipId,
+                        )
+                      }
+                      className="flex-row items-center gap-2"
+                      style={{
+                        paddingVertical: 4,
+                        paddingHorizontal: 6,
+                        borderRadius: 10,
+                        backgroundColor: isSelected
+                          ? color + '22'
+                          : 'transparent',
+                      }}
+                    >
+                      <View
+                        className="w-2.5 h-2.5 rounded-full"
+                        style={{ backgroundColor: color }}
+                      />
+                      <EmojiOrIcon
+                        value={r.icon}
+                        fallback="sparkle"
+                        size={14}
+                      />
+                      <View className="flex-1 min-w-0">
+                        <View className="flex-row items-center gap-2">
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              color: c.text,
+                              fontSize: 13,
+                              flex: 1,
+                              fontWeight: isSelected ? '700' : '400',
+                            }}
+                          >
+                            {r.name}
+                          </Text>
+                          <Text
+                            style={{
+                              color: c.textSecondary,
+                              fontSize: 11,
+                              fontWeight: '700',
+                            }}
+                          >
+                            {formatPct(r.value, periodExpense)}
+                          </Text>
+                        </View>
+                        <View className="flex-row items-center gap-2 mt-1">
+                          <View
+                            className="h-1 rounded-full flex-1 overflow-hidden"
+                            style={{ backgroundColor: c.bg }}
+                          >
+                            <AnimatedLegendBar
+                              color={color}
+                              pct={
+                                periodExpense > 0
+                                  ? Math.round(
+                                      (r.value / periodExpense) * 100,
+                                    )
+                                  : 0
+                              }
+                            />
+                          </View>
+                          <Text
+                            style={{ color: c.textMuted, fontSize: 10 }}
+                          >
+                            ฿{formatTHB(r.value)}
+                          </Text>
+                        </View>
+                      </View>
+                    </Pressable>
+                  );
+                })
+              )}
+            </View>
           </View>
 
           {topCategory ? (
@@ -428,7 +533,10 @@ export default function InsightsScreen() {
             </View>
           ) : null}
 
-          {/* Top-4 categories grid (2 cols × 2 rows) */}
+          {/* No-data placeholder — only when the period is truly empty.
+              The donut's floating chips already enumerate categories
+              for non-empty periods, so the old top-4 grid that used to
+              live here was redundant and has been removed. */}
           {breakdown.rows.length === 0 ? (
             <Text
               className="text-center mt-3"
@@ -436,63 +544,196 @@ export default function InsightsScreen() {
             >
               {t('insights.noPeriodExpense', { defaultValue: 'No expenses in this period' })}
             </Text>
-          ) : (
-            <View
-              className="flex-row flex-wrap mt-3"
-              style={{ marginHorizontal: -4 }}
-            >
-              {breakdown.rows.slice(0, 4).map((r, i) => (
-                <View
-                  key={r.id ?? `none-${i}`}
-                  style={{ width: '50%', padding: 4 }}
-                >
-                  <View
-                    className="flex-row items-center gap-2 p-2.5 rounded-xl"
-                    style={{ backgroundColor: c.bg }}
+          ) : null}
+
+          {/* Drilldown: tap a floating chip to filter the list below to
+              just that category's transactions in this period. */}
+          {selectedCatId != null
+            ? (() => {
+                const matches = periodTxs
+                  .filter((tx) => {
+                    if (tx.kind !== 'expense') return false;
+                    if (selectedCatId === '__none__')
+                      return tx.category_id == null;
+                    return tx.category_id === selectedCatId;
+                  })
+                  .sort((a, b) =>
+                    a.occurred_at < b.occurred_at ? 1 : -1,
+                  );
+                const selRow = breakdown.rows.find(
+                  (r) => (r.id ?? '__none__') === selectedCatId,
+                );
+                const selIdx = breakdown.rows.findIndex(
+                  (r) => (r.id ?? '__none__') === selectedCatId,
+                );
+                const accentColor =
+                  selIdx >= 0
+                    ? CATEGORY_PALETTE[selIdx % CATEGORY_PALETTE.length]
+                    : c.accent;
+                const totalSel = matches.reduce(
+                  (s, tx) => s + tx.amount,
+                  0,
+                );
+                const selIconText =
+                  selRow?.icon && selRow.icon.length <= 4
+                    ? selRow.icon
+                    : null;
+                return (
+                  <Animated.View
+                    entering={FadeInDown.duration(220)}
+                    className="mt-3 rounded-2xl overflow-hidden"
+                    style={{
+                      backgroundColor: c.card,
+                      borderWidth: 1,
+                      borderColor: accentColor + '33',
+                    }}
                   >
+                    {/* Header */}
                     <View
+                      className="flex-row items-center px-3 py-3"
                       style={{
-                        width: 28,
-                        height: 28,
-                        borderRadius: 14,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        backgroundColor:
-                          CATEGORY_PALETTE[i % CATEGORY_PALETTE.length] + '33',
+                        gap: 10,
+                        borderBottomWidth: 1,
+                        borderBottomColor: c.border,
+                        backgroundColor: accentColor + '14',
                       }}
                     >
-                      <EmojiOrIcon
-                        value={r.icon}
-                        fallback="sparkle"
-                        size={16}
-                      />
-                    </View>
-                    <View className="flex-1 min-w-0">
-                      <Text
-                        numberOfLines={1}
+                      <View
                         style={{
-                          color: c.text,
+                          width: 30,
+                          height: 30,
+                          borderRadius: 15,
+                          backgroundColor: accentColor + '33',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        {selIconText ? (
+                          <Text style={{ fontSize: 16 }}>{selIconText}</Text>
+                        ) : (
+                          <EmojiOrIcon
+                            value={selRow?.icon}
+                            fallback="sparkle"
+                            size={16}
+                          />
+                        )}
+                      </View>
+                      <View className="flex-1 min-w-0">
+                        <Text
+                          numberOfLines={1}
+                          style={{
+                            color: c.text,
+                            fontSize: 14,
+                            fontWeight: '800',
+                          }}
+                        >
+                          {selRow?.name ?? '—'}
+                        </Text>
+                        <Text
+                          style={{
+                            color: c.textSecondary,
+                            fontSize: 11,
+                            marginTop: 1,
+                          }}
+                        >
+                          {matches.length} รายการ · ฿{formatTHB(totalSel)}
+                        </Text>
+                      </View>
+                      <Pressable
+                        onPress={() => setSelectedCatId(null)}
+                        hitSlop={6}
+                        style={{
+                          width: 26,
+                          height: 26,
+                          borderRadius: 13,
+                          backgroundColor: c.card,
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: c.textSecondary,
+                            fontSize: 13,
+                            fontWeight: '700',
+                          }}
+                        >
+                          ✕
+                        </Text>
+                      </Pressable>
+                    </View>
+                    {/* List */}
+                    {matches.length === 0 ? (
+                      <Text
+                        style={{
+                          color: c.textMuted,
                           fontSize: 12,
-                          fontWeight: '600',
+                          padding: 14,
+                          textAlign: 'center',
                         }}
                       >
-                        {r.name}
+                        ไม่มีรายการในหมวดนี้
                       </Text>
-                      <Text
-                        style={{
-                          color: c.textSecondary,
-                          fontSize: 11,
-                          fontWeight: '500',
-                        }}
-                      >
-                        ฿{formatTHB(r.value)} · {formatPct(r.value, periodExpense)}
-                      </Text>
-                    </View>
-                  </View>
-                </View>
-              ))}
-            </View>
-          )}
+                    ) : (
+                      matches.map((tx, i) => (
+                        <View
+                          key={tx.id}
+                          className="flex-row items-center px-3 py-2.5"
+                          style={{
+                            gap: 10,
+                            borderTopWidth: i === 0 ? 0 : 1,
+                            borderTopColor: c.border,
+                          }}
+                        >
+                          <View
+                            style={{
+                              minWidth: 42,
+                              paddingHorizontal: 8,
+                              paddingVertical: 3,
+                              borderRadius: 999,
+                              backgroundColor: c.bg,
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: c.textSecondary,
+                                fontSize: 10,
+                                fontWeight: '700',
+                              }}
+                            >
+                              {new Intl.DateTimeFormat(locale, {
+                                day: '2-digit',
+                                month: 'short',
+                              }).format(new Date(tx.occurred_at))}
+                            </Text>
+                          </View>
+                          <Text
+                            numberOfLines={1}
+                            style={{
+                              flex: 1,
+                              color: c.text,
+                              fontSize: 13,
+                            }}
+                          >
+                            {tx.note?.trim() || selRow?.name || 'รายการ'}
+                          </Text>
+                          <Text
+                            style={{
+                              color: c.text,
+                              fontSize: 13,
+                              fontWeight: '700',
+                            }}
+                          >
+                            ฿{formatTHB(tx.amount)}
+                          </Text>
+                        </View>
+                      ))
+                    )}
+                  </Animated.View>
+                );
+              })()
+            : null}
         </Animated.View>
 
         {/* 4. Payment-method split — cash vs transfer of this period's
@@ -752,6 +993,26 @@ function PaymentMethodCard({
         {t('insights.shareOfExpense', { defaultValue: '{pct}% of spending', pct })}
       </Text>
     </View>
+  );
+}
+
+/** Thin h-1 legend bar — matches the dashboard's category breakdown. */
+function AnimatedLegendBar({ color, pct }: { color: string; pct: number }) {
+  const progress = useSharedValue(0);
+  useEffect(() => {
+    progress.value = withTiming(Math.max(0, Math.min(100, pct)), {
+      duration: 760,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [pct, progress]);
+  const style = useAnimatedStyle(() => ({
+    width: `${progress.value}%`,
+  }));
+  return (
+    <Animated.View
+      className="h-1 rounded-full"
+      style={[{ backgroundColor: color }, style]}
+    />
   );
 }
 

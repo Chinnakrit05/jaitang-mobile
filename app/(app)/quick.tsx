@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Pressable,
@@ -11,6 +11,19 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { router, useLocalSearchParams } from 'expo-router';
 import Svg, { Path } from 'react-native-svg';
 import { useTranslation } from 'react-i18next';
+import Animated, {
+  Easing,
+  FadeIn,
+  FadeOut,
+  runOnJS,
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+} from 'react-native-reanimated';
+import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 
 import { useActiveLedger } from '../../providers/ActiveLedgerProvider';
 import { useActiveTrip } from '../../providers/ActiveTripProvider';
@@ -25,7 +38,13 @@ import {
 import { sortCategoriesByHierarchy } from '../../lib/categories-helpers';
 import { CURRENCIES, currencySymbol, useFxRate } from '../../lib/fx';
 import type { Shortcut } from '../../lib/shortcuts';
-import { Mascot } from '../../components/Mascot';
+import {
+  applyCategoryOrder,
+  loadCategoryOrder,
+  loadShowAllPref,
+  saveCategoryOrder,
+  saveShowAllPref,
+} from '../../lib/category-order';
 import { EmojiOrIcon } from '../../components/icons/EmojiOrIcon';
 
 /**
@@ -89,8 +108,16 @@ export default function QuickAddScreen() {
   const [payment, setPayment] = useState<'cash' | 'transfer'>('cash');
   const [accountId, setAccountId] = useState<string | null>(null);
   const [currency, setCurrency] = useState<string>(home);
+  // Currency picker stays collapsed by default — the row showed every pill
+  // upfront which was visually noisy for the 99% case (THB). Tap to open.
+  const [currencyOpen, setCurrencyOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showAllCats, setShowAllCats] = useState(false);
+  // Edit mode for the category grid — adds ↑↓ controls per tile and
+  // pins the picker open so the user can see (and reorder) the full
+  // list. Saved order persists via AsyncStorage in lib/category-order.
+  const [editCats, setEditCats] = useState(false);
+  const [catOrder, setCatOrder] = useState<string[]>([]);
 
   // Foreign-currency capture: when `currency !== home`, the amount field
   // holds the FOREIGN value and we convert to home for storage. `amount`
@@ -109,19 +136,65 @@ export default function QuickAddScreen() {
       ? Math.round(Number(amount.replace(/,/g, '')) * fxRate)
       : null;
 
-  const filteredCats = useMemo(
-    () =>
-      sortCategoriesByHierarchy(
-        (cats.data ?? []).filter((cat) => cat.kind === kind),
-      ),
-    [cats.data, kind],
-  );
+  // Load this ledger's saved ordering + show-all preference when the
+  // active ledger changes. Each ledger gets its own preference because
+  // category sets differ between books.
+  useEffect(() => {
+    const lid = ledger?.id;
+    if (!lid) {
+      setCatOrder([]);
+      setShowAllCats(false);
+      return;
+    }
+    let cancelled = false;
+    Promise.all([loadCategoryOrder(lid), loadShowAllPref(lid)]).then(
+      ([order, showAll]) => {
+        if (cancelled) return;
+        setCatOrder(order);
+        setShowAllCats(showAll);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [ledger?.id]);
+
+  const filteredCats = useMemo(() => {
+    const base = (cats.data ?? []).filter((cat) => cat.kind === kind);
+    // Once the user reorders, honor that exactly — skip the parent-then-
+    // sub regrouping so manual swaps aren't undone. Until then, fall
+    // back to the default hierarchy sort.
+    return catOrder.length > 0
+      ? applyCategoryOrder(base, catOrder)
+      : sortCategoriesByHierarchy(base);
+  }, [cats.data, kind, catOrder]);
+
+  // For sub-categories the tile shows the parent's icon as a small corner
+  // badge instead of the old "↳ " name prefix — gives users a at-a-glance
+  // anchor of which family the sub belongs to.
+  const categoryById = useMemo(() => {
+    const m = new Map<string, (typeof filteredCats)[number]>();
+    for (const c of cats.data ?? []) m.set(c.id, c);
+    return m;
+  }, [cats.data]);
 
   const visibleCats = useMemo(
-    () => (showAllCats ? filteredCats : filteredCats.slice(0, MAX_VISIBLE_CATS)),
-    [filteredCats, showAllCats],
+    () =>
+      showAllCats || editCats
+        ? filteredCats
+        : filteredCats.slice(0, MAX_VISIBLE_CATS),
+    [filteredCats, showAllCats, editCats],
   );
   const overflowCount = Math.max(0, filteredCats.length - MAX_VISIBLE_CATS);
+
+  /** Toggle the "show all by default" preference. Persists immediately. */
+  function toggleShowAll(next: boolean) {
+    setShowAllCats(next);
+    const lid = ledger?.id;
+    if (lid) saveShowAllPref(lid, next).catch((e) =>
+      console.error('saveShowAllPref failed:', e),
+    );
+  }
 
   function reset() {
     setAmount('');
@@ -240,36 +313,6 @@ export default function QuickAddScreen() {
               {t('quick.clear')}
             </Text>
           </Pressable>
-        </View>
-
-        {/* Shiba greeting — avatar + speech bubble */}
-        <View className="flex-row items-center gap-3">
-          <View
-            style={{
-              width: 48,
-              height: 48,
-              borderRadius: 24,
-              backgroundColor: c.cardElevated,
-              alignItems: 'center',
-              justifyContent: 'center',
-              overflow: 'hidden',
-            }}
-          >
-            {/* The mascot's viewBox includes a ground shadow — shift it
-                down slightly so the face sits centered in the circle. */}
-            <View style={{ marginTop: 4 }}>
-              <Mascot size={48} />
-            </View>
-          </View>
-          <View
-            className="rounded-full px-4 py-2.5 flex-1"
-            style={{ backgroundColor: c.card }}
-          >
-            <Text style={{ color: c.text, fontSize: 13 }}>
-              {t('quick.greetingPrefix')}{' '}
-              <Text style={{ fontWeight: '700' }}>{t('quick.greetingStrong')}</Text> 🦴
-            </Text>
-          </View>
         </View>
 
         {/* Shortcuts row — saved templates from the long-press action
@@ -391,20 +434,63 @@ export default function QuickAddScreen() {
         </View>
 
         {/* Amount — hero card uses accent color for visual punch
-            (white text reads cleanly on the orange surface). */}
+            (white text reads cleanly on the orange surface). Currency
+            picker now lives in the top-right of this card: collapsed by
+            default to a small "THB ▾" chip, tap to expand into a full
+            scroll row of pills below the card. */}
         <View
           className="rounded-3xl px-5 py-6"
           style={{ backgroundColor: c.accent }}
         >
-          <Text
-            className="text-center"
-            style={{
-              color: 'rgba(255, 255, 255, 0.75)',
-              fontSize: 13,
-            }}
-          >
-            {t('common.amount')}
-          </Text>
+          {/* Top row: label centered, currency chip in the right corner. */}
+          <View className="flex-row items-center">
+            <View style={{ width: 60 }} />
+            <Text
+              className="text-center"
+              style={{
+                color: 'rgba(255, 255, 255, 0.75)',
+                fontSize: 13,
+                flex: 1,
+              }}
+            >
+              {t('common.amount')}
+            </Text>
+            <Pressable
+              onPress={() => setCurrencyOpen((v) => !v)}
+              style={{
+                width: 60,
+                alignItems: 'flex-end',
+              }}
+            >
+              <View
+                style={{
+                  flexDirection: 'row',
+                  alignItems: 'center',
+                  gap: 4,
+                  paddingHorizontal: 10,
+                  paddingVertical: 5,
+                  borderRadius: 999,
+                  backgroundColor: 'rgba(255,255,255,0.18)',
+                }}
+              >
+                <Text
+                  style={{ color: '#FFFFFF', fontSize: 11, fontWeight: '700' }}
+                >
+                  {currency}
+                </Text>
+                <Text
+                  style={{
+                    color: 'rgba(255,255,255,0.85)',
+                    fontSize: 10,
+                    fontWeight: '700',
+                    transform: [{ rotate: currencyOpen ? '180deg' : '0deg' }],
+                  }}
+                >
+                  ▾
+                </Text>
+              </View>
+            </Pressable>
+          </View>
           <View className="flex-row items-baseline justify-center gap-1 mt-2">
             <Text
               style={{
@@ -448,83 +534,99 @@ export default function QuickAddScreen() {
           )}
         </View>
 
-        {/* Currency picker — home currency first, then the common set.
-            Foreign selection flips the amount field to that currency and
-            stores the home-equiv on save. */}
-        <View>
-          <Text
-            style={{
-              color: c.text,
-              fontSize: 13,
-              fontWeight: '600',
-              marginBottom: 8,
-              marginLeft: 2,
-            }}
+        {/* Currency list — animated, only mounted when the chip is tapped.
+            Reanimated's layout transitions handle the fade + slight slide
+            so it feels like a real dropdown without any imperative work. */}
+        {currencyOpen && (
+          <Animated.View
+            entering={FadeIn.duration(180)}
+            exiting={FadeOut.duration(140)}
           >
-            {t('quick.currency', { defaultValue: 'สกุลเงิน' })}
-          </Text>
-          <ScrollView
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={{ gap: 8, paddingRight: 4 }}
-          >
-            {currencyOptions.map((cur) => {
-              const sel = currency === cur;
-              return (
-                <Pressable
-                  key={cur}
-                  onPress={() => setCurrency(cur)}
-                  style={{
-                    paddingHorizontal: 14,
-                    paddingVertical: 9,
-                    borderRadius: 999,
-                    backgroundColor: sel ? c.accent : c.card,
-                    borderWidth: 1,
-                    borderColor: sel ? c.accent : c.border,
-                  }}
-                >
-                  <Text
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={{ gap: 8, paddingRight: 4 }}
+            >
+              {currencyOptions.map((cur) => {
+                const sel = currency === cur;
+                return (
+                  <Pressable
+                    key={cur}
+                    onPress={() => {
+                      setCurrency(cur);
+                      setCurrencyOpen(false);
+                    }}
                     style={{
-                      color: sel ? c.accentText : c.text,
-                      fontSize: 12,
-                      fontWeight: sel ? '800' : '600',
+                      paddingHorizontal: 14,
+                      paddingVertical: 9,
+                      borderRadius: 999,
+                      backgroundColor: sel ? c.accent : c.card,
+                      borderWidth: 1,
+                      borderColor: sel ? c.accent : c.border,
                     }}
                   >
-                    {currencySymbol(cur)} {cur}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </ScrollView>
-        </View>
+                    <Text
+                      style={{
+                        color: sel ? c.accentText : c.text,
+                        fontSize: 12,
+                        fontWeight: sel ? '800' : '600',
+                      }}
+                    >
+                      {currencySymbol(cur)} {cur}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+          </Animated.View>
+        )}
 
         {/* Payment method */}
-        <View>
-          <Text
-            style={{
-              color: c.text,
-              fontSize: 13,
-              fontWeight: '600',
-              marginBottom: 8,
-              marginLeft: 2,
-            }}
+        {/* Note (left) + payment methods (right). Two columns so the
+            two infrequent inputs share one row, freeing space below for
+            the category grid. Payment cards stack vertically on the
+            right and the note card stretches to match the column height. */}
+        <View className="flex-row gap-3" style={{ alignItems: 'stretch' }}>
+          {/* Left — note input. Multiline so it can grow as the right
+              column grows with both payment cards. */}
+          <View
+            className="rounded-2xl px-4 py-3"
+            style={{ flex: 1, backgroundColor: c.card }}
           >
-            {t('quick.paymentMethod')}
-          </Text>
-          <View className="flex-row gap-3">
-            <PaymentCard
+            <View className="flex-row items-start gap-2" style={{ flex: 1 }}>
+              <Text style={{ fontSize: 16, marginTop: 2 }}>📝</Text>
+              <TextInput
+                value={note}
+                onChangeText={setNote}
+                placeholder={t('common.noteOptional')}
+                placeholderTextColor={c.textMuted}
+                multiline
+                textAlignVertical="top"
+                style={{
+                  color: c.text,
+                  fontSize: 14,
+                  flex: 1,
+                  paddingVertical: 4,
+                  minHeight: 56,
+                }}
+              />
+            </View>
+          </View>
+          {/* Right — payment methods stacked. Compact variants: the
+              two cards combined now match the height of a single
+              regular card so the row stays low-profile. */}
+          <View style={{ flex: 1, gap: 6 }}>
+            <CompactPaymentCard
               colors={c}
               icon="💵"
               title={t('quick.cash')}
-              subtitle={t('quick.cashHint')}
               selected={payment === 'cash'}
               onPress={() => setPayment('cash')}
             />
-            <PaymentCard
+            <CompactPaymentCard
               colors={c}
               icon="🏦"
               title={t('quick.transfer')}
-              subtitle="PromptPay"
               selected={payment === 'transfer'}
               onPress={() => setPayment('transfer')}
             />
@@ -613,17 +715,95 @@ export default function QuickAddScreen() {
 
         {/* Category grid — 4 columns, each tile its own card */}
         <View>
-          <Text
-            style={{
-              color: c.text,
-              fontSize: 13,
-              fontWeight: '600',
-              marginBottom: 10,
-              marginLeft: 2,
-            }}
+          <View
+            className="flex-row items-center justify-between"
+            style={{ marginBottom: 10, paddingHorizontal: 2 }}
           >
-            {t('quick.chooseCategory')}
-          </Text>
+            <Text style={{ color: c.text, fontSize: 13, fontWeight: '600' }}>
+              {t('quick.chooseCategory')}
+            </Text>
+            <Pressable
+              onPress={() => setEditCats((v) => !v)}
+              style={{
+                paddingHorizontal: editCats ? 18 : 10,
+                paddingVertical: editCats ? 9 : 4,
+                borderRadius: 999,
+                backgroundColor: editCats ? c.accent : c.chip,
+                // Edit-mode "เสร็จ" is the primary exit affordance now
+                // that the bottom save bar is hidden — make it pop.
+                shadowColor: editCats ? c.accent : 'transparent',
+                shadowOpacity: editCats ? 0.35 : 0,
+                shadowRadius: 8,
+                shadowOffset: { width: 0, height: 3 },
+                elevation: editCats ? 4 : 0,
+              }}
+            >
+              <Text
+                style={{
+                  color: editCats ? c.accentText : c.textSecondary,
+                  fontSize: editCats ? 14 : 11,
+                  fontWeight: editCats ? '800' : '700',
+                }}
+              >
+                {editCats
+                  ? `✓ ${t('common.done', { defaultValue: 'เสร็จ' })}`
+                  : `✏️ ${t('common.edit', { defaultValue: 'แก้ไข' })}`}
+              </Text>
+            </Pressable>
+          </View>
+          {/* Edit-mode toolbar: choose whether to show everything by
+              default, or stick with the compact "ที่ใช้บ่อย" view. */}
+          {editCats && (
+            <View
+              className="flex-row gap-2"
+              style={{ marginBottom: 10, paddingHorizontal: 2 }}
+            >
+              <Pressable
+                onPress={() => toggleShowAll(false)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  borderRadius: 999,
+                  backgroundColor: !showAllCats ? c.accent : c.card,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: !showAllCats ? c.accent : c.border,
+                }}
+              >
+                <Text
+                  style={{
+                    color: !showAllCats ? c.accentText : c.text,
+                    fontSize: 11,
+                    fontWeight: '700',
+                  }}
+                >
+                  ที่ใช้บ่อย ({MAX_VISIBLE_CATS})
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => toggleShowAll(true)}
+                style={{
+                  flex: 1,
+                  paddingVertical: 8,
+                  borderRadius: 999,
+                  backgroundColor: showAllCats ? c.accent : c.card,
+                  alignItems: 'center',
+                  borderWidth: 1,
+                  borderColor: showAllCats ? c.accent : c.border,
+                }}
+              >
+                <Text
+                  style={{
+                    color: showAllCats ? c.accentText : c.text,
+                    fontSize: 11,
+                    fontWeight: '700',
+                  }}
+                >
+                  ทั้งหมด ({filteredCats.length})
+                </Text>
+              </Pressable>
+            </View>
+          )}
           {cats.isLoading ? (
             <ActivityIndicator color={c.accent} />
           ) : visibleCats.length === 0 ? (
@@ -635,11 +815,35 @@ export default function QuickAddScreen() {
                 {t('quick.noCategories')}
               </Text>
             </Pressable>
+          ) : editCats ? (
+            /* Drag-and-drop grid — long-press a tile (~180ms) to lift
+               it, then drag to any slot. Releasing snaps it into place
+               and persists the new order. Other tiles animate to their
+               new positions after the drop, not live during the drag. */
+            <DraggableCatGrid
+              cats={filteredCats}
+              categoryById={categoryById}
+              colors={c}
+              onReorder={(from, to) => {
+                if (from === to) return;
+                const ids = filteredCats.map((cc) => cc.id);
+                const [moved] = ids.splice(from, 1);
+                ids.splice(to, 0, moved);
+                setCatOrder(ids);
+                const lid = ledger?.id;
+                if (lid)
+                  saveCategoryOrder(lid, ids).catch((e) =>
+                    console.error('saveCategoryOrder failed:', e),
+                  );
+              }}
+            />
           ) : (
             <View className="flex-row flex-wrap" style={{ marginHorizontal: -4 }}>
               {visibleCats.map((cat) => {
                 const selected = categoryId === cat.id;
-                const isSub = !!cat.parent_id;
+                const parent = cat.parent_id
+                  ? categoryById.get(cat.parent_id)
+                  : null;
                 return (
                   <View key={cat.id} style={{ width: '25%', padding: 4 }}>
                     <Pressable
@@ -656,6 +860,36 @@ export default function QuickAddScreen() {
                         gap: 6,
                       }}
                     >
+                      {/* Parent badge — small icon in the top-right
+                          showing which family this sub belongs to.
+                          Replaces the old "↳ " name prefix. */}
+                      {parent && (
+                        <View
+                          style={{
+                            position: 'absolute',
+                            top: 4,
+                            right: 4,
+                            width: 20,
+                            height: 20,
+                            borderRadius: 10,
+                            backgroundColor: selected
+                              ? 'rgba(255,255,255,0.22)'
+                              : c.chip,
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                          }}
+                        >
+                          {parent.icon && parent.icon.length <= 4 ? (
+                            <Text style={{ fontSize: 11 }}>{parent.icon}</Text>
+                          ) : (
+                            <EmojiOrIcon
+                              value={parent.icon}
+                              fallback="sparkle"
+                              size={12}
+                            />
+                          )}
+                        </View>
+                      )}
                       <Text style={{ fontSize: 26 }}>
                         {cat.icon &&
                         // If the icon value is a sprite name (text), JtIcon
@@ -681,7 +915,6 @@ export default function QuickAddScreen() {
                           fontWeight: selected ? '700' : '500',
                         }}
                       >
-                        {isSub ? '↳ ' : ''}
                         {cat.name}
                       </Text>
                     </Pressable>
@@ -722,37 +955,18 @@ export default function QuickAddScreen() {
           )}
         </View>
 
-        {/* Optional note */}
-        <View
-          className="rounded-2xl px-4 py-3"
-          style={{ backgroundColor: c.card }}
-        >
-          <View className="flex-row items-center gap-2">
-            <Text style={{ fontSize: 16 }}>📝</Text>
-            <TextInput
-              value={note}
-              onChangeText={setNote}
-              placeholder={t('common.noteOptional')}
-              placeholderTextColor={c.textMuted}
-              style={{
-                color: c.text,
-                fontSize: 14,
-                flex: 1,
-                paddingVertical: 4,
-              }}
-            />
-          </View>
-        </View>
-
       </ScrollView>
+      {/* Sticky save bar — hidden while editing the category grid so
+          a stray tap on "บันทึก" doesn't get mistaken for "exit edit". */}
       <View
-        pointerEvents="box-none"
+        pointerEvents={editCats ? 'none' : 'box-none'}
         style={{
           position: 'absolute',
           left: 0,
           right: 0,
           bottom: Math.max(insets.bottom, 8),
           paddingHorizontal: 16,
+          opacity: editCats ? 0 : 1,
         }}
       >
         <View
@@ -819,18 +1033,268 @@ export default function QuickAddScreen() {
   );
 }
 
-function PaymentCard({
+/**
+ * Drag-and-drop category grid used in the picker's edit mode. Keeps
+ * the 4-col grid layout from the normal picker — each tile is just an
+ * absolutely-positioned `Animated.View` whose target slot is derived
+ * from its index. Long-press lifts a tile (z-index + scale + opacity);
+ * pan moves it; release computes the destination slot from the finger
+ * position and bubbles a `(from, to)` callback up. Other tiles slide
+ * to their new spots via `withTiming` once the new order arrives.
+ */
+const GRID_COLS = 4;
+const GRID_TILE_H = 88;
+
+type GridCat = {
+  id: string;
+  name: string;
+  icon: string | null;
+  parent_id: string | null;
+};
+
+function DraggableCatGrid({
+  cats,
+  categoryById,
+  colors,
+  onReorder,
+}: {
+  cats: GridCat[];
+  categoryById: Map<string, GridCat>;
+  colors: ReturnType<typeof useTheme>['colors'];
+  onReorder: (from: number, to: number) => void;
+}) {
+  const [gridW, setGridW] = useState(0);
+  const tileW = gridW > 0 ? gridW / GRID_COLS : 0;
+  const rows = Math.ceil(cats.length / GRID_COLS);
+  return (
+    <View
+      onLayout={(e) => setGridW(e.nativeEvent.layout.width)}
+      style={{ width: '100%', height: rows * GRID_TILE_H }}
+    >
+      {tileW > 0 &&
+        cats.map((cat, idx) => (
+          <DraggableTile
+            key={cat.id}
+            cat={cat}
+            idx={idx}
+            tileW={tileW}
+            tileH={GRID_TILE_H}
+            itemCount={cats.length}
+            parent={cat.parent_id ? categoryById.get(cat.parent_id) ?? null : null}
+            colors={colors}
+            onReorder={onReorder}
+          />
+        ))}
+    </View>
+  );
+}
+
+function DraggableTile({
+  cat,
+  idx,
+  tileW,
+  tileH,
+  itemCount,
+  parent,
+  colors,
+  onReorder,
+}: {
+  cat: GridCat;
+  idx: number;
+  tileW: number;
+  tileH: number;
+  itemCount: number;
+  parent: GridCat | null;
+  colors: ReturnType<typeof useTheme>['colors'];
+  onReorder: (from: number, to: number) => void;
+}) {
+  const baseX = (idx % GRID_COLS) * tileW;
+  const baseY = Math.floor(idx / GRID_COLS) * tileH;
+
+  // tx/ty hold the tile's actual position so we can animate other
+  // tiles to their new slots after a drop without yanking the dragged
+  // tile back to its old base first.
+  const tx = useSharedValue(baseX);
+  const ty = useSharedValue(baseY);
+  const dragging = useSharedValue(false);
+  const dragX = useSharedValue(0);
+  const dragY = useSharedValue(0);
+  const mounted = useRef(false);
+  // iOS-style jiggle while edit mode is active. Alternating phase per
+  // tile so neighbors wobble in opposite directions instead of in sync.
+  const wobble = useSharedValue(0);
+  useEffect(() => {
+    wobble.value = withDelay(
+      (idx % 2) * 80,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 110, easing: Easing.linear }),
+          withTiming(-1, { duration: 220, easing: Easing.linear }),
+          withTiming(0, { duration: 110, easing: Easing.linear }),
+        ),
+        -1,
+        false,
+      ),
+    );
+    return () => {
+      wobble.value = 0;
+    };
+  }, [idx, wobble]);
+
+  useEffect(() => {
+    if (tileW === 0) return;
+    if (!mounted.current) {
+      // Snap to base position on first paint, no animation.
+      tx.value = baseX;
+      ty.value = baseY;
+      mounted.current = true;
+      return;
+    }
+    if (dragging.value) return;
+    tx.value = withTiming(baseX, { duration: 220 });
+    ty.value = withTiming(baseY, { duration: 220 });
+  }, [baseX, baseY, tileW, tx, ty, dragging]);
+
+  const animStyle = useAnimatedStyle(() => {
+    // Pause the jiggle on the tile the user is actively dragging so it
+    // lifts cleanly without spinning.
+    const rotateDeg = dragging.value ? 0 : wobble.value * 1.6;
+    return {
+      transform: [
+        { translateX: dragging.value ? tx.value + dragX.value : tx.value },
+        { translateY: dragging.value ? ty.value + dragY.value : ty.value },
+        { rotate: `${rotateDeg}deg` },
+        { scale: dragging.value ? 1.08 : 1 },
+      ],
+      zIndex: dragging.value ? 1000 : 0,
+      elevation: dragging.value ? 10 : 0,
+      opacity: dragging.value ? 0.94 : 1,
+    };
+  });
+
+  const pan = Gesture.Pan()
+    .activateAfterLongPress(180)
+    .onStart(() => {
+      dragging.value = true;
+      dragX.value = 0;
+      dragY.value = 0;
+    })
+    .onChange((e) => {
+      dragX.value = e.translationX;
+      dragY.value = e.translationY;
+    })
+    .onEnd(() => {
+      const finalX = tx.value + dragX.value;
+      const finalY = ty.value + dragY.value;
+      // Snap tx/ty to the drop position so the post-release animation
+      // starts from where the user let go, not where the tile began.
+      tx.value = finalX;
+      ty.value = finalY;
+      dragX.value = 0;
+      dragY.value = 0;
+      dragging.value = false;
+
+      const fingerX = finalX + tileW / 2;
+      const fingerY = finalY + tileH / 2;
+      const newCol = Math.max(
+        0,
+        Math.min(GRID_COLS - 1, Math.floor(fingerX / tileW)),
+      );
+      const newRow = Math.max(0, Math.floor(fingerY / tileH));
+      const newIdx = Math.min(itemCount - 1, newRow * GRID_COLS + newCol);
+
+      if (newIdx === idx) {
+        // No reorder — useEffect won't fire, so animate back manually.
+        tx.value = withTiming(baseX, { duration: 220 });
+        ty.value = withTiming(baseY, { duration: 220 });
+      } else {
+        runOnJS(onReorder)(idx, newIdx);
+      }
+    });
+
+  const iconText = cat.icon && cat.icon.length <= 4 ? cat.icon : null;
+
+  return (
+    <GestureDetector gesture={pan}>
+      <Animated.View
+        style={[
+          {
+            position: 'absolute',
+            width: tileW,
+            height: tileH,
+            padding: 4,
+          },
+          animStyle,
+        ]}
+      >
+        <View
+          style={{
+            flex: 1,
+            paddingVertical: 16,
+            borderRadius: 18,
+            backgroundColor: colors.card,
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+          }}
+        >
+          {parent && (
+            <View
+              style={{
+                position: 'absolute',
+                top: 4,
+                right: 4,
+                width: 20,
+                height: 20,
+                borderRadius: 10,
+                backgroundColor: colors.chip,
+                alignItems: 'center',
+                justifyContent: 'center',
+              }}
+            >
+              {parent.icon && parent.icon.length <= 4 ? (
+                <Text style={{ fontSize: 11 }}>{parent.icon}</Text>
+              ) : (
+                <EmojiOrIcon
+                  value={parent.icon}
+                  fallback="sparkle"
+                  size={12}
+                />
+              )}
+            </View>
+          )}
+          {iconText ? (
+            <Text style={{ fontSize: 26 }}>{iconText}</Text>
+          ) : (
+            <EmojiOrIcon value={cat.icon} fallback="sparkle" size={24} />
+          )}
+          <Text
+            numberOfLines={1}
+            style={{ color: colors.text, fontSize: 12, fontWeight: '500' }}
+          >
+            {cat.name}
+          </Text>
+        </View>
+      </Animated.View>
+    </GestureDetector>
+  );
+}
+
+/**
+ * Slim payment chip — single-line icon + title, no subtitle. Used in
+ * the note-and-payment row so two stacked chips total roughly one
+ * regular card's height.
+ */
+function CompactPaymentCard({
   colors,
   icon,
   title,
-  subtitle,
   selected,
   onPress,
 }: {
   colors: ReturnType<typeof useTheme>['colors'];
   icon: string;
   title: string;
-  subtitle: string;
   selected: boolean;
   onPress: () => void;
 }) {
@@ -839,48 +1303,41 @@ function PaymentCard({
       onPress={onPress}
       style={{
         flex: 1,
-        padding: 12,
-        borderRadius: 18,
+        paddingHorizontal: 10,
+        paddingVertical: 6,
+        borderRadius: 12,
         backgroundColor: colors.card,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 8,
         borderWidth: 1.5,
         borderColor: selected ? colors.accent : 'transparent',
       }}
     >
-      <View
+      <Text style={{ fontSize: 16 }}>{icon}</Text>
+      <Text
+        numberOfLines={1}
         style={{
-          width: 36,
-          height: 36,
-          borderRadius: 12,
-          backgroundColor: colors.bg,
-          alignItems: 'center',
-          justifyContent: 'center',
+          color: colors.text,
+          fontSize: 12,
+          fontWeight: '700',
+          flex: 1,
         }}
       >
-        <Text style={{ fontSize: 18 }}>{icon}</Text>
-      </View>
-      <View className="flex-1">
-        <Text style={{ color: colors.text, fontSize: 13, fontWeight: '700' }}>
-          {title}
-        </Text>
-        <Text style={{ color: colors.textSecondary, fontSize: 10 }}>
-          {subtitle}
-        </Text>
-      </View>
+        {title}
+      </Text>
       {selected && (
         <View
           style={{
-            width: 22,
-            height: 22,
-            borderRadius: 11,
+            width: 16,
+            height: 16,
+            borderRadius: 8,
             backgroundColor: colors.accent,
             alignItems: 'center',
             justifyContent: 'center',
           }}
         >
-          <Text style={{ color: '#FFFFFF', fontSize: 12, fontWeight: '700' }}>
+          <Text style={{ color: '#FFFFFF', fontSize: 9, fontWeight: '700' }}>
             ✓
           </Text>
         </View>
@@ -888,3 +1345,4 @@ function PaymentCard({
     </Pressable>
   );
 }
+

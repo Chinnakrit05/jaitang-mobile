@@ -143,6 +143,11 @@ function DonutSegment({
     strokeDashoffset: -offset + dash * (1 - progress.value),
   }));
 
+  // `round` cleans up the look of large slices but turns tiny ones
+  // (e.g. 0.1%) into a pair of full-width circular blobs that visually
+  // pile up at the boundary between segments. Anything thinner than
+  // roughly one stroke-width gets rendered with flat caps to avoid that.
+  const useRound = dash > strokeWidth * 1.4;
   return (
     <AnimatedCircle
       cx={50}
@@ -153,7 +158,7 @@ function DonutSegment({
       strokeWidth={strokeWidth}
       strokeDasharray={`${dash} ${circumference - dash}`}
       animatedProps={animatedProps}
-      strokeLinecap="round"
+      strokeLinecap={useRound ? 'round' : 'butt'}
     />
   );
 }

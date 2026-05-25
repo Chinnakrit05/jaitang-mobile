@@ -32,6 +32,14 @@ type RowSpec = {
   destructive?: boolean;
 };
 
+type QuickSpec = {
+  icon: IconName;
+  label: string;
+  href: string;
+  /** Pastel tile background. Pulled from the active theme so it adapts to dark/OLED. */
+  tint: string;
+};
+
 function ChevronRightIcon({ color, size }: { color: string; size: number }) {
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
@@ -77,25 +85,31 @@ export default function MoreScreen() {
     );
   }
 
-  const general: RowSpec[] = [
+  // The 3 quick-access tiles that surface above the long "ทั่วไป" list —
+  // intentionally kept short (รายงาน / สมุดบัญชี / โอนเงิน) and only
+  // here, not duplicated in the general rows below.
+  const quick: QuickSpec[] = [
     {
-      icon: 'receipt',
-      label: t('nav.report', { defaultValue: 'รายงานรายเดือน' }),
-      hint: t('report.subtitle', { defaultValue: 'สรุปแต่ละเดือน + บิลประจำที่ต้องกรอก' }),
+      icon: 'bar-chart-3',
+      label: t('nav.report', { defaultValue: 'รายงาน' }),
       href: '/(app)/report',
+      tint: c.expenseBg,
     },
     {
       icon: 'accounts',
-      label: 'บัญชี / กระเป๋า',
-      hint: 'เงินสด, ธนาคาร, อีวอลเล็ต',
+      label: t('nav.accountsShort', { defaultValue: 'สมุดบัญชี' }),
       href: '/(app)/accounts',
+      tint: c.incomeBg,
     },
     {
       icon: 'arrow-left-right',
       label: t('nav.transfers', { defaultValue: 'โอนเงิน' }),
-      hint: t('transfers.subtitle', { defaultValue: 'ย้ายเงินระหว่างบัญชี' }),
       href: '/(app)/transfers',
+      tint: c.chip,
     },
+  ];
+
+  const general: RowSpec[] = [
     {
       icon: 'goals',
       label: t('nav.goals', { defaultValue: 'เป้าออม' }),
@@ -210,6 +224,28 @@ export default function MoreScreen() {
           <ChevronRightIcon color={c.textMuted} size={18} />
         </Pressable>
 
+        {/* Quick access — 3-up grid of the most-used screens */}
+        <View>
+          <Text
+            style={{
+              color: c.textSecondary,
+              fontSize: 11,
+              fontWeight: '600',
+              marginBottom: 6,
+              marginLeft: 4,
+              textTransform: 'uppercase',
+              letterSpacing: 0.5,
+            }}
+          >
+            {t('more.quickSection', { defaultValue: 'เข้าใช้บ่อย' })}
+          </Text>
+          <View className="flex-row" style={{ gap: 10 }}>
+            {quick.map((q) => (
+              <QuickTile key={q.label} spec={q} colors={c} />
+            ))}
+          </View>
+        </View>
+
         {/* General section */}
         <Section
           title={t('more.generalSection', { defaultValue: 'General' })}
@@ -249,6 +285,48 @@ export default function MoreScreen() {
         </Text>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function QuickTile({
+  spec,
+  colors,
+}: {
+  spec: QuickSpec;
+  colors: ReturnType<typeof useTheme>['colors'];
+}) {
+  return (
+    <Pressable
+      onPress={() => router.push(spec.href as never)}
+      className="flex-1 rounded-2xl items-center justify-center"
+      style={{
+        backgroundColor: colors.card,
+        paddingVertical: 14,
+        paddingHorizontal: 6,
+        gap: 8,
+      }}
+    >
+      <View
+        className="rounded-2xl items-center justify-center"
+        style={{
+          width: 52,
+          height: 52,
+          backgroundColor: spec.tint,
+        }}
+      >
+        <JtIcon name={spec.icon} size={28} />
+      </View>
+      <Text
+        numberOfLines={1}
+        style={{
+          color: colors.text,
+          fontSize: 13,
+          fontWeight: '700',
+        }}
+      >
+        {spec.label}
+      </Text>
+    </Pressable>
   );
 }
 
